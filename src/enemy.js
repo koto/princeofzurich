@@ -136,6 +136,29 @@ export const ARCHETYPES = {
   },
 };
 
+// Junior: a deliberate half-step between the tutorial rookie and a trained sentry,
+// used for the first real duel so the difficulty ramps instead of jumping.
+ARCHETYPES.junior = {
+  ...ARCHETYPES.sentry,
+  baseDelay: 0.60,
+  delayPerSkill: 0.04,
+  minDelay: 0.50,
+  parryBase: 0.22,
+  parryPerSkill: 0.04,
+  spamParryBonus: 0.18,
+  parryCap: 0.55,
+  riposteChance: 0.50,
+  riposteWindup: 0.265,
+  strikeWindup: 0.30,
+  strikeRecovery: 0.30,
+  feintChance: 0.0,
+  heavyChance: 0.0,
+  followUpChance: 0.0,
+  retreatAfterHit: 0.18,
+  retreatAfterStrike: 0.16,
+};
+
+
 export class Enemy {
   constructor(roomId, def) {
     this.roomId = roomId;
