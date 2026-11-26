@@ -178,8 +178,8 @@ export const level1 = {
       ],
       enemies: [
         {
-          col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2,
-          archetype: 'sentry', name: 'Meister Baer',
+          col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 1,
+          archetype: 'junior', name: 'Meister Baer',
           bark: '"THAT IS ASSET 0041! SIGN IT OUT OR DROP IT!"',
         },
       ],
