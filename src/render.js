@@ -187,6 +187,116 @@ const LEVEL_THEMES = [
 ];
 
 // ---------------------------------------------------------------------------
+// Oblique (Cabinet-Style) 2.5D Projection Constants & Palette Shading Helpers
+// ---------------------------------------------------------------------------
+// Front plane is z = 0; back wall is z = 1, receding +ISO_DX right and ISO_DY up.
+// Light comes consistently from top-right-front so exposed 9px right side faces
+// read clearly as sculpted 3D masonry against dark backdrops:
+//   TOP faces = lightest, RIGHT SIDE faces = lit (with gradient into back-wall AO),
+//   FRONT faces = mid masonry, CEILING SOFFITS & LEFT INNER REVEALS = deep shadow.
+
+const ISO_DX = 9;
+const ISO_DY = -8;
+const SLAB_FRONT_OFF = 2; // Front-top lip sits at floorY + 2 so character feet sit on the top face
+const SLAB_FRONT_H = 4;   // Front face height = 4px -> slab bottom sits cleanly at (row + 1) * TILE_H
+const WALL_REVEAL_L = 6;  // Shadowed left inner reveal thickness on right-side walls/openings
+const WALL_SOFFIT_H = 6;  // Shadowed ceiling underside soffit thickness on overhanging walls
+
+function parseHex(hex) {
+  const h = hex.startsWith('#') ? hex.slice(1) : hex;
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function toHex(r, g, b) {
+  const cl = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  return '#' + ((1 << 24) + (cl(r) << 16) + (cl(g) << 8) + cl(b)).toString(16).slice(1);
+}
+
+function mixHex(a, b, t) {
+  const [ar, ag, ab] = parseHex(a);
+  const [br, bg, bb] = parseHex(b);
+  return toHex(ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t);
+}
+
+function hexRgba(hex, alpha) {
+  const [r, g, b] = parseHex(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Derive harmonized 3D shading tones for each of the 10 level themes
+const ISO_THEMES = LEVEL_THEMES.map((t) => ({
+  ...t,
+  // Wall top faces match the floor slab top-face look so walkable wall tops join seamlessly
+  wallTop: mixHex(t.floorTop, t.wallHi, 0.20),
+  wallTopBack: mixHex(t.floorTop, t.floorDark, 0.42),
+  // Lit right side face (brighter at front arris, darkening smoothly toward back-wall AO)
+  wallSideLit: mixHex(t.wallHi, t.floorTop, 0.34),
+  wallSideMid: mixHex(t.wallFill, t.wallHi, 0.32),
+  wallSideBack: mixHex(t.wallDark, t.wallFill, 0.35),
+  // Shadowed inner reveals (left-facing room walls & ceiling undersides)
+  wallRevealFront: mixHex(t.wallFill, t.wallDark, 0.48),
+  wallRevealBack: mixHex(t.wallDark, '#030508', 0.45),
+  wallSoffitFront: mixHex(t.wallFill, t.wallDark, 0.62),
+  wallSoffitBack: mixHex(t.wallDark, '#020406', 0.62),
+  wallArrisHi: mixHex(t.wallHi, '#ffffff', 0.24),
+  wallSide: mixHex(t.wallHi, t.wallFill, 0.42),
+  floorTopHi: mixHex(t.floorTop, '#ffffff', 0.16),
+  floorTopBack: mixHex(t.floorTop, t.floorDark, 0.42),
+  floorSide: mixHex(t.floorTop, t.floorFace, 0.48),
+  floorSideBack: mixHex(t.floorFace, t.floorDark, 0.55),
+  floorEdgeBevel: mixHex(t.floorTop, '#ffffff', 0.30),
+  recessDark: mixHex(t.wallDark, '#020406', 0.55),
+  pilasterFill: hexRgba(t.wallDark, 0.48),
+  pilasterHi: hexRgba(t.wallFill, 0.32),
+  backTint: hexRgba(t.wallDark, 0.22),
+}));
+
+// Offscreen static room geometry cache (keyed by "levelId:roomId")
+const MAX_ROOM_CACHE = 64;
+const roomStaticCache = new Map();
+
+function createOffscreen(w, h) {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      const c = new OffscreenCanvas(w, h);
+      const cctx = c.getContext('2d');
+      if (cctx) return { canvas: c, ctx: cctx };
+    } catch (_) {
+      // Fall through to DOM canvas
+    }
+  }
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const cctx = c.getContext('2d');
+    if (cctx) return { canvas: c, ctx: cctx };
+  }
+  return null;
+}
+
+function fillQuad(ctx, x1, y1, x2, y2, x3, y3, x4, y4, fill) {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.lineTo(x3, y3);
+  ctx.lineTo(x4, y4);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawIsoLine(ctx, x1, y1, x2, y2, color, width = 1) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+
+// ---------------------------------------------------------------------------
 // Character palettes
 // ---------------------------------------------------------------------------
 
@@ -503,6 +613,30 @@ export function drawCharacter(ctx, ent, time) {
 
   ctx.save();
   ctx.translate(Math.round(ent.x), Math.round(ent.y));
+
+  // Oblique contact shadow on the floor's top face (world-space skew, independent of facing)
+  if (ent.grounded) {
+    ctx.save();
+    ctx.transform(1, 0, ISO_DX / ISO_DY, 1, 1.3, -0.7);
+    if (ent.alive) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 8.8, 2.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5.8, 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Elongated shadow under fallen body lying on the top face
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
+      ctx.beginPath();
+      ctx.ellipse(ent.facing > 0 ? 4 : -4, -0.6, 12.5, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   if (ent.facing < 0) {
     ctx.scale(-1, 1);
   }
@@ -516,14 +650,6 @@ export function drawCharacter(ctx, ent, time) {
 
   // Hit flash
   const flashing = ent.hurtFlash > 0 && Math.floor(ent.hurtFlash * 24) % 2 === 0;
-
-  // Ground shadow when grounded
-  if (ent.grounded && ent.alive) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 7.5, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   // Forward kinematics joints
   const pelvis = { x: pose.px, y: pose.py };
@@ -542,10 +668,24 @@ export function drawCharacter(ctx, ent, time) {
     if (rFoot.y > 0) rFoot.y = 0;
   }
 
-  const lElbow = limbEndDown(shoulder.x, shoulder.y, pose.lUpper, 5.2);
-  const lHand = limbEndDown(lElbow.x, lElbow.y, pose.lFore, 5.2);
-  const rElbow = limbEndDown(shoulder.x, shoulder.y, pose.rUpper, 5.2);
-  const rHand = limbEndDown(rElbow.x, rElbow.y, pose.rFore, 5.2);
+  let lElbow = limbEndDown(shoulder.x, shoulder.y, pose.lUpper, 5.2);
+  let lHand = limbEndDown(lElbow.x, lElbow.y, pose.lFore, 5.2);
+  let rElbow = limbEndDown(shoulder.x, shoulder.y, pose.rUpper, 5.2);
+  let rHand = limbEndDown(rElbow.x, rElbow.y, pose.rFore, 5.2);
+
+  // Visual ledge-grip IK when hanging so hands visibly meet the oblique ledge rim
+  if (clip === 'hang') {
+    // Front hand grips near front-top corner of the slab; back hand grips along the receding oblique edge
+    const sway = Math.sin((ent.animT || 0) * Math.PI * 2) * 0.35;
+    const rTarget = { x: 4.3, y: -25.4 + sway * 0.2 };
+    const lTarget = ent.facing > 0
+      ? { x: 7.2, y: -28.0 + sway * 0.2 }
+      : { x: 1.5, y: -27.6 + sway * 0.2 };
+    rHand = rTarget;
+    lHand = lTarget;
+    rElbow = { x: lerp(shoulder.x, rTarget.x, 0.48) - 1.2, y: lerp(shoulder.y, rTarget.y, 0.45) - 0.5 };
+    lElbow = { x: lerp(shoulder.x, lTarget.x, 0.48) - 0.8, y: lerp(shoulder.y, lTarget.y, 0.45) - 0.8 };
+  }
 
   const jacket = flashing ? '#ffffff' : pal.jacket;
   const jacketDark = flashing ? '#ffcccc' : pal.jacketDark;
@@ -722,6 +862,818 @@ export function drawSwissClock(ctx, cx, cy, r, timeRemainingSec) {
 }
 
 // ---------------------------------------------------------------------------
+// Oblique 2.5D Static Room Cache & Procedural Architectural Geometry
+// ---------------------------------------------------------------------------
+
+function isStaticWalkable(ch) {
+  return ch !== '.' && ch !== '#' && ch !== 'L';
+}
+
+function getIsoTheme(levelId) {
+  return ISO_THEMES[((levelId % ISO_THEMES.length) + ISO_THEMES.length) % ISO_THEMES.length];
+}
+
+function getWallGeom(level, room, c, r) {
+  const leftWall = level.getTile(room.id, c - 1, r) === '#';
+  const rightWall = level.getTile(room.id, c + 1, r) === '#';
+  const upWall = level.getTile(room.id, c, r - 1) === '#';
+  const downWall = (r === ROWS - 1 && room.links.down === null)
+    ? true
+    : level.getTile(room.id, c, r + 1) === '#';
+  const isPillar = !leftWall && !rightWall;
+  // Right-side walls & right edges of openings show a shadowed 6px left inner reveal
+  // (convex standalone pillars keep a single consistent 9px right side face)
+  const hasLeftReveal = !leftWall && rightWall && c >= 0;
+  const hasRightSide = !rightWall;
+  const hasSoffit = !downWall;
+  const hasTopFace = !upWall;
+  // Row 0 ceiling band gets a deep 6px soffit; lower-row overhangs use 4px (= SLAB_FRONT_H)
+  // so their cornice aligns flush to the exact pixel with adjacent floor slab fronts!
+  const soffitH = hasSoffit ? (r === 0 ? WALL_SOFFIT_H : SLAB_FRONT_H) : 0;
+  // Top-right inner corner block directly above a right wall with a 6px left inner reveal
+  const notchBL = leftWall && downWall && c >= 0 && r < ROWS - 1 &&
+    level.getTile(room.id, c - 1, r + 1) !== '#' &&
+    level.getTile(room.id, c, r + 1) === '#' &&
+    level.getTile(room.id, c + 1, r + 1) === '#';
+  const notchBLH = notchBL ? (r === 0 ? WALL_SOFFIT_H : SLAB_FRONT_H) : 0;
+  return {
+    leftWall, rightWall, upWall, downWall, isPillar,
+    hasLeftReveal, hasRightSide, hasSoffit, hasTopFace, soffitH, notchBL, notchBLH,
+  };
+}
+
+function tileHasLeftReveal(level, room, c, r) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+  if (level.getTile(room.id, c, r) !== '#') return false;
+  return getWallGeom(level, room, c, r).hasLeftReveal;
+}
+
+function drawWallFrontFace(ctx, x, topY, theme, geom, c, r) {
+  const { leftWall, rightWall, upWall, downWall, isPillar, hasLeftReveal, hasSoffit, soffitH, notchBL, notchBLH } = geom;
+  const fx = x + (hasLeftReveal ? WALL_REVEAL_L : 0);
+  const fw = TILE_W - (hasLeftReveal ? WALL_REVEAL_L : 0);
+  const fh = TILE_H - soffitH;
+
+  if (notchBL) {
+    // Clip out the 6x(notchBLH) bottom-left inner corner so ceiling soffit & right reveal miter cleanly!
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(fx, topY);
+    ctx.lineTo(fx + fw, topY);
+    ctx.lineTo(fx + fw, topY + fh);
+    ctx.lineTo(fx + WALL_REVEAL_L, topY + fh);
+    ctx.lineTo(fx + WALL_REVEAL_L, topY + fh - notchBLH);
+    ctx.lineTo(fx, topY + fh - notchBLH);
+    ctx.closePath();
+    ctx.clip();
+  }
+
+  if (isPillar) {
+    // Architectural 3D column/pillar (capital, fluted shaft, plinth base)
+    const padL = 2;
+    const padR = 2;
+    const px = fx + padL;
+    const pw = fw - padL - padR;
+
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(fx, topY, fw, fh);
+
+    ctx.fillStyle = theme.wallFill;
+    ctx.fillRect(px, topY, pw, fh);
+    // Shaded left edge, lit right arris (consistent with top-right-front light)
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(px, topY, 2, fh);
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(px + pw - 3, topY, 3, fh);
+    // Central fluted grooves
+    const flTop = topY + (upWall ? 0 : 7);
+    const flH = Math.max(4, fh - (upWall ? 0 : 7) - (downWall ? 0 : 7));
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    ctx.fillRect(px + 6, flTop, 2, flH);
+    ctx.fillRect(px + 13, flTop, 2, flH);
+    ctx.fillRect(px + 20, flTop, 2, flH);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(px + 8, flTop, 1, flH);
+    ctx.fillRect(px + 15, flTop, 1, flH);
+    ctx.fillRect(px + 22, flTop, 1, flH);
+
+    // Capital crown when exposed at top
+    if (!upWall) {
+      ctx.fillStyle = theme.wallHi;
+      ctx.fillRect(fx, topY, fw, 3);
+      ctx.fillStyle = theme.wallTrim;
+      ctx.fillRect(fx + 1, topY + 3, fw - 2, 2);
+      ctx.fillStyle = theme.wallDark;
+      ctx.fillRect(fx + 1, topY + 5, fw - 2, 2);
+    }
+    // Plinth / soffit cornice when exposed at bottom
+    if (!downWall) {
+      ctx.fillStyle = theme.wallTrim;
+      ctx.fillRect(fx + 1, topY + fh - 5, fw - 2, 2);
+      ctx.fillStyle = theme.wallHi;
+      ctx.fillRect(fx, topY + fh - 3, fw, 1);
+      ctx.fillStyle = theme.wallDark;
+      ctx.fillRect(fx, topY + fh - 2, fw, 2);
+    }
+    if (notchBL) ctx.restore();
+    return;
+  }
+
+  // Solid masonry/concrete wall block front face
+  ctx.fillStyle = theme.wallFill;
+  ctx.fillRect(fx, topY, fw, fh);
+
+  // Subtle vertical shading gradient across the face
+  const g = ctx.createLinearGradient(fx, topY, fx, topY + fh);
+  g.addColorStop(0, 'rgba(255,255,255,0.05)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.18)');
+  ctx.fillStyle = g;
+  ctx.fillRect(fx, topY, fw, fh);
+
+  // Coursed ashlar / panel horizontal & vertical joints (clipped cleanly inside front face)
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  for (const cy of [15, 31]) {
+    if (cy < fh - 2) {
+      ctx.fillRect(fx, topY + cy, fw, 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(fx, topY + cy + 1, fw, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    }
+  }
+  const j1 = 10 + ((c * 7 + r * 5) & 7);
+  const j2 = 4 + ((c * 11 + r * 3) & 7);
+  const j3 = 18 + ((c * 5 + r * 9) & 7);
+  if (x + j1 > fx + 1 && x + j1 < fx + fw - 1) ctx.fillRect(x + j1, topY + (upWall ? 0 : 2), 1, Math.min(15, fh) - (upWall ? 0 : 2));
+  if (x + j2 > fx + 1 && x + j2 < fx + fw - 1 && fh > 16) ctx.fillRect(x + j2, topY + 16, 1, Math.min(15, fh - 16));
+  if (x + j3 > fx + 1 && x + j3 < fx + fw - 1 && fh > 32) ctx.fillRect(x + j3, topY + 32, 1, Math.max(0, fh - 32));
+
+  // Crisp 3D edge bevels ONLY on exposed outer edges (no double seams between adjacent walls!)
+  if (!upWall) {
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(fx, topY, fw, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.20)';
+    ctx.fillRect(fx, topY, fw, 1);
+  }
+  if (!rightWall) {
+    // Crisp lit vertical front arris where front face turns onto the 9px lit right side face
+    ctx.fillStyle = theme.wallArrisHi;
+    ctx.fillRect(fx + fw - 1, topY, 1, fh);
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(fx + fw - 2, topY, 1, fh);
+  }
+  if (!leftWall) {
+    // Crisp corner crease where front face turns into the shadowed left inner reveal
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(fx, topY, 1, fh);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(fx + 1, topY, 1, fh);
+  }
+  if (hasSoffit) {
+    // Architectural lower cornice rim where front face turns under into the ceiling soffit
+    ctx.fillStyle = hexRgba(theme.wallTrim, 0.55);
+    ctx.fillRect(fx, topY + fh - 3, fw, 1);
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(fx, topY + fh - 2, fw, 1);
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(fx, topY + fh - 1, fw, 1);
+  }
+  if (notchBL) {
+    // Continue the ceiling cornice cleanly into the top-right miter corner
+    ctx.fillStyle = hexRgba(theme.wallTrim, 0.55);
+    ctx.fillRect(fx, topY + fh - notchBLH - 3, WALL_REVEAL_L + 1, 1);
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(fx, topY + fh - notchBLH - 2, WALL_REVEAL_L + 1, 1);
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(fx, topY + fh - notchBLH - 1, WALL_REVEAL_L, 1);
+    ctx.restore();
+  }
+}
+
+function drawWallBlock(ctx, level, room, c, r, theme) {
+  const x = c * TILE_W;
+  const topY = r * TILE_H;
+  const botY = topY + TILE_H;
+  const W = TILE_W;
+
+  const geom = getWallGeom(level, room, c, r);
+  const { leftWall, rightWall, upWall, downWall, isPillar, hasLeftReveal, hasRightSide, hasSoffit, hasTopFace, soffitH, notchBL, notchBLH } = geom;
+
+  const fx0 = x + (hasLeftReveal ? WALL_REVEAL_L : 0);
+  const fx1 = x + W;
+  const fy1 = botY - soffitH;
+
+  // Check if ceiling overhang sits diagonally above-right or above-left for exact room-box corner miters
+  const ceilAboveRight = upWall && hasRightSide &&
+    level.getTile(room.id, c + 1, r - 1) === '#' &&
+    level.getTile(room.id, c + 1, r) !== '#';
+  const ceilAboveLeft = upWall && hasLeftReveal &&
+    level.getTile(room.id, c - 1, r - 1) === '#' &&
+    level.getTile(room.id, c - 1, r) !== '#';
+  const aboveSoffitH = (r - 1 === 0) ? WALL_SOFFIT_H : SLAB_FRONT_H;
+  const leftTileCh = level.getTile(room.id, c - 1, r);
+  const rightTileCh = level.getTile(room.id, c + 1, r);
+
+  // 1. Lit TOP face (visible whenever tile above is not a solid wall — matches floor slab top-face look!)
+  if (hasTopFace) {
+    const tg = ctx.createLinearGradient(x, topY + ISO_DY, x, topY);
+    tg.addColorStop(0, theme.wallTopBack);
+    tg.addColorStop(0.7, theme.wallTop);
+    tg.addColorStop(1, theme.floorTopHi);
+    const lxBack = hasLeftReveal ? x : x + ISO_DX;
+    const rxBack = rightWall ? x + W : x + W + ISO_DX;
+    fillQuad(ctx, fx0, topY, lxBack, topY + ISO_DY, rxBack, topY + ISO_DY, fx1, topY, tg);
+    fillQuad(ctx, lxBack, topY + ISO_DY + 2, lxBack, topY + ISO_DY, rxBack, topY + ISO_DY, rxBack, topY + ISO_DY + 2, 'rgba(0,0,0,0.24)');
+    if (leftWall) {
+      drawIsoLine(ctx, x + 0.5, topY, x + ISO_DX + 0.5, topY + ISO_DY, 'rgba(0,0,0,0.22)', 1);
+    }
+    const midTopBack = Math.min(rxBack, x + 16 + ISO_DX);
+    drawIsoLine(ctx, x + 16, topY, midTopBack, topY + ISO_DY, 'rgba(0,0,0,0.12)', 1);
+    if (!rightWall) {
+      drawIsoLine(ctx, fx1, topY, fx1 + ISO_DX, topY + ISO_DY, 'rgba(255,255,255,0.22)', 1);
+    }
+  }
+
+  // 2. Lit 9px RIGHT SIDE face (extruded masonry thickness wherever open space is to the right)
+  if (hasRightSide) {
+    const sideTopFrontY = ceilAboveRight ? topY - aboveSoffitH : topY;
+    const sideTopBackY = ceilAboveRight ? topY : topY + ISO_DY;
+    const sideBotFrontY = fy1;
+    const sideBotBackY = hasSoffit ? botY : botY + ISO_DY;
+
+    const sg = ctx.createLinearGradient(fx1, topY, fx1 + ISO_DX, topY);
+    sg.addColorStop(0, theme.wallSideLit);
+    sg.addColorStop(0.58, theme.wallSideMid);
+    sg.addColorStop(1, theme.wallSideBack);
+    fillQuad(
+      ctx,
+      fx1, sideTopFrontY,
+      fx1 + ISO_DX, sideTopBackY,
+      fx1 + ISO_DX, sideBotBackY,
+      fx1, sideBotFrontY,
+      sg
+    );
+
+    fillQuad(
+      ctx,
+      fx1, topY + 15,
+      fx1 + ISO_DX, topY + 15 + ISO_DY,
+      fx1 + ISO_DX, Math.min(sideBotBackY, topY + 31 + ISO_DY),
+      fx1, Math.min(sideBotFrontY, topY + 31),
+      'rgba(0,0,0,0.10)'
+    );
+
+    for (const cy of [15, 31]) {
+      if (topY + cy < sideBotFrontY - 1) {
+        drawIsoLine(ctx, fx1, topY + cy + 0.5, fx1 + ISO_DX, topY + cy + 0.5 + ISO_DY, 'rgba(0,0,0,0.34)', 1);
+        drawIsoLine(ctx, fx1, topY + cy + 1.5, fx1 + ISO_DX, topY + cy + 1.5 + ISO_DY, 'rgba(255,255,255,0.09)', 1);
+      }
+    }
+    if (isPillar && !upWall) {
+      drawIsoLine(ctx, fx1, topY + 4, fx1 + ISO_DX, topY + 4 + ISO_DY, hexRgba(theme.wallTrim, 0.7), 2);
+    }
+    if (isPillar && !downWall) {
+      drawIsoLine(ctx, fx1, fy1 - 4, fx1 + ISO_DX, sideBotBackY - 4, hexRgba(theme.wallTrim, 0.65), 2);
+    }
+
+    const aoG = ctx.createLinearGradient(fx1 + ISO_DX - 4, 0, fx1 + ISO_DX, 0);
+    aoG.addColorStop(0, 'rgba(0,0,0,0)');
+    aoG.addColorStop(1, 'rgba(0,0,0,0.46)');
+    fillQuad(ctx, fx1 + ISO_DX - 4, sideTopBackY + 3, fx1 + ISO_DX, sideTopBackY, fx1 + ISO_DX, sideBotBackY, fx1 + ISO_DX - 4, sideBotBackY + 3, aoG);
+
+    if (rightTileCh !== '.' && rightTileCh !== '#') {
+      const yF = floorY(r) + SLAB_FRONT_OFF;
+      const yB = yF + ISO_DY;
+      fillQuad(ctx, fx1, yF, fx1 + ISO_DX, yB, fx1 + ISO_DX, yB - 4, fx1, yF - 4, 'rgba(0,0,0,0.28)');
+    }
+    if (ceilAboveRight) {
+      drawIsoLine(ctx, fx1, sideTopFrontY, fx1 + ISO_DX, sideTopBackY, 'rgba(0,0,0,0.45)', 1.2);
+    }
+  }
+
+  // 3. Shadowed 6px LEFT INNER REVEAL (on right room boundary walls & right sides of shafts/openings)
+  if (hasLeftReveal) {
+    const revTopFrontY = ceilAboveLeft ? topY - aboveSoffitH : topY;
+    const revTopBackY = topY;
+    const revBotFrontY = fy1;
+    const revBotBackY = botY;
+
+    const leftIsStaticFloor = isStaticWalkable(leftTileCh);
+    const fYF = floorY(r) + SLAB_FRONT_OFF;
+    const fYB = fYF + ISO_DY;
+    const bFrontY = leftIsStaticFloor ? Math.min(revBotFrontY, fYF) : revBotFrontY;
+    const bBackY = leftIsStaticFloor ? fYB : revBotBackY;
+
+    const rg = ctx.createLinearGradient(fx0, topY, x, topY);
+    rg.addColorStop(0, theme.wallRevealFront);
+    rg.addColorStop(0.65, theme.wallDark);
+    rg.addColorStop(1, theme.wallRevealBack);
+    fillQuad(ctx, fx0, revTopFrontY, x, revTopBackY, x, bBackY, fx0, bFrontY, rg);
+
+    for (const cy of [15, 31]) {
+      if (topY + cy < bFrontY - 1) {
+        const yBackCourse = Math.min(bBackY, topY + cy + (leftIsStaticFloor ? -2 : 0));
+        drawIsoLine(ctx, fx0, topY + cy + 0.5, x, yBackCourse + 0.5, 'rgba(0,0,0,0.40)', 1);
+      }
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(x, revTopBackY, 2, Math.max(0, bBackY - revTopBackY));
+    if (leftIsStaticFloor) {
+      fillQuad(ctx, fx0, fYF, x, fYB, x, fYB - 4, fx0, fYF - 4, 'rgba(0,0,0,0.34)');
+    }
+    if (ceilAboveLeft) {
+      drawIsoLine(ctx, fx0, revTopFrontY, x, revTopBackY, 'rgba(0,0,0,0.48)', 1.2);
+    }
+  }
+
+  // 4. Shadowed CEILING SOFFIT REVEAL (underside of ceiling band & overhanging walls)
+  if (hasSoffit) {
+    const leftBelowIsLeftWall = leftWall && level.getTile(room.id, c - 1, r + 1) === '#';
+    const rightBelowIsRightWall = rightWall && tileHasLeftReveal(level, room, c + 1, r + 1);
+
+    const sLxFront = fx0;
+    const sLxBack = hasLeftReveal ? x : (leftBelowIsLeftWall ? x + ISO_DX : (leftWall ? x : x + ISO_DX));
+    const sRxFront = rightBelowIsRightWall ? fx1 + WALL_REVEAL_L : fx1;
+    const sRxBack = rightBelowIsRightWall ? fx1 : (rightWall ? fx1 : fx1 + ISO_DX);
+
+    const cg = ctx.createLinearGradient(0, fy1, 0, botY);
+    cg.addColorStop(0, theme.wallSoffitFront);
+    cg.addColorStop(1, theme.wallSoffitBack);
+    fillQuad(ctx, sLxFront, fy1, sRxFront, fy1, sRxBack, botY, sLxBack, botY, cg);
+
+    if (!hasLeftReveal && leftWall && !leftBelowIsLeftWall) {
+      drawIsoLine(ctx, x + 0.5, fy1, x + 0.5, botY, 'rgba(0,0,0,0.28)', 1);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(Math.min(sLxBack, sRxBack), botY - 1, Math.abs(sRxBack - sLxBack), 1);
+  }
+
+  // 4b. Top-right inner corner miter inside notchBL (cleanly joins ceiling soffit & right wall reveal!)
+  if (notchBL) {
+    const ny0 = botY - notchBLH;
+    const cg = ctx.createLinearGradient(0, ny0, 0, botY);
+    cg.addColorStop(0, theme.wallSoffitFront);
+    cg.addColorStop(1, theme.wallSoffitBack);
+    fillQuad(ctx, x, ny0, x + WALL_REVEAL_L, ny0, x, botY, x, botY, cg);
+
+    const rg = ctx.createLinearGradient(x + WALL_REVEAL_L, 0, x, 0);
+    rg.addColorStop(0, theme.wallRevealFront);
+    rg.addColorStop(0.65, theme.wallDark);
+    rg.addColorStop(1, theme.wallRevealBack);
+    fillQuad(ctx, x + WALL_REVEAL_L, ny0, x + WALL_REVEAL_L, botY, x, botY, x, botY, rg);
+
+    drawIsoLine(ctx, x + WALL_REVEAL_L, ny0, x, botY, 'rgba(0,0,0,0.50)', 1.2);
+  }
+
+  // 5. FRONT face
+  drawWallFrontFace(ctx, x, topY, theme, geom, c, r);
+}
+
+function getSlabEdgeFlags(level, room, c, r) {
+  let climbLeft = false;
+  let climbRight = false;
+  let dropLeft = false;
+  let dropRight = false;
+  if (c >= 0 && c < COLS) {
+    const leftRaw = c - 1 >= 0 ? room.grid[r][c - 1] : level.getTile(room.id, c - 1, r);
+    if (leftRaw === '.') {
+      if (level.hasFloor(room.id, c - 1, r + 1) && !level.isWall(room.id, c - 1, r + 1)) climbLeft = true;
+      else dropLeft = true;
+    }
+    const rightRaw = c + 1 < COLS ? room.grid[r][c + 1] : level.getTile(room.id, c + 1, r);
+    if (rightRaw === '.') {
+      if (level.hasFloor(room.id, c + 1, r + 1) && !level.isWall(room.id, c + 1, r + 1)) climbRight = true;
+      else dropRight = true;
+    }
+  }
+  return { climbLeft, climbRight, dropLeft, dropRight };
+}
+
+function drawFloorSlabFront(ctx, fx, fyy, theme, {
+  isLoose = false, leftHasFloor = false, climbLeft = false, climbRight = false, dropLeft = false, dropRight = false, extraRightW = 0,
+} = {}) {
+  const yF = fyy + SLAB_FRONT_OFF;
+  const W = TILE_W + extraRightW;
+
+  ctx.fillStyle = theme.floorFace;
+  ctx.fillRect(fx, yF, W, SLAB_FRONT_H);
+  // Crisp front-top bevel edge
+  ctx.fillStyle = theme.floorEdgeBevel;
+  ctx.fillRect(fx, yF, W, 1);
+  // Dark underside rim
+  ctx.fillStyle = theme.floorDark;
+  ctx.fillRect(fx, yF + SLAB_FRONT_H - 1, W, 1);
+
+  // Subtle vertical masonry joints
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  if (leftHasFloor || isLoose) {
+    ctx.fillRect(fx, yF + 1, 1, SLAB_FRONT_H - 1);
+  }
+  ctx.fillRect(fx + 16, yF + 1, 1, SLAB_FRONT_H - 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(fx + 17, yF + 1, 1, SLAB_FRONT_H - 2);
+  if (extraRightW > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(fx + TILE_W, yF + 1, 1, SLAB_FRONT_H - 2);
+  }
+
+  if (isLoose) {
+    // Vertical fracture notches on the front face aligned with the top-face cracks
+    ctx.fillStyle = '#05070a';
+    ctx.fillRect(fx + 1, yF, 1, SLAB_FRONT_H);
+    ctx.fillRect(fx + TILE_W - 2, yF, 1, SLAB_FRONT_H);
+    ctx.fillRect(fx + 8, yF, 2, SLAB_FRONT_H);
+    ctx.fillRect(fx + 20, yF, 2, SLAB_FRONT_H);
+    ctx.fillStyle = '#e8dcc0';
+    ctx.fillRect(fx + 6, yF, 2, 1);
+    ctx.fillRect(fx + 18, yF, 2, 1);
+    ctx.fillStyle = theme.floorTrim;
+    ctx.fillRect(fx + 2, yF + 2, 3, 1);
+    ctx.fillRect(fx + TILE_W - 5, yF + 2, 3, 1);
+  }
+
+  // Preserve front brass corner brackets on climbable/drop ledges across both base & foreground passes
+  if (climbLeft) {
+    ctx.fillStyle = theme.floorTrim;
+    ctx.fillRect(fx, yF, 5, 3);
+    ctx.fillStyle = '#fff3cf';
+    ctx.fillRect(fx, yF, 5, 1);
+    ctx.fillRect(fx, yF, 1, SLAB_FRONT_H);
+  } else if (dropLeft) {
+    ctx.fillStyle = theme.floorTrim;
+    ctx.fillRect(fx, yF, 3, 2);
+  }
+  if (climbRight) {
+    ctx.fillStyle = theme.floorTrim;
+    ctx.fillRect(fx + TILE_W - 5, yF, 5, 3);
+    ctx.fillStyle = '#fff3cf';
+    ctx.fillRect(fx + TILE_W - 5, yF, 5, 1);
+    ctx.fillRect(fx + TILE_W - 1, yF, 1, SLAB_FRONT_H);
+  } else if (dropRight) {
+    ctx.fillStyle = theme.floorTrim;
+    ctx.fillRect(fx + TILE_W - 3, yF, 3, 2);
+  }
+}
+
+function drawFloorSlab(ctx, level, room, c, r, fx, fyy, theme, opts = {}) {
+  const isLoose = !!opts.isLoose;
+  const isStaticPass = !!opts.isStaticPass;
+  const ch = opts.ch ?? (c >= 0 && c < COLS ? room.grid[r][c] : level.getTile(room.id, c, r));
+  const W = TILE_W;
+  const yF = fyy + SLAB_FRONT_OFF;
+  const yB = yF + ISO_DY;
+  const yBot = yF + SLAB_FRONT_H;
+  const yBotB = yBot + ISO_DY;
+
+  const leftCh = level.getTile(room.id, c - 1, r);
+  const rightCh = level.getTile(room.id, c + 1, r);
+  const belowCh = level.getTile(room.id, c, r + 1);
+
+  const rightIsWall = rightCh === '#';
+  const rightWallHasReveal = rightIsWall && tileHasLeftReveal(level, room, c + 1, r);
+  const extraRightW = rightWallHasReveal ? WALL_REVEAL_L : 0;
+  const rightHasFloor = isStaticPass
+    ? isStaticWalkable(rightCh)
+    : (rightCh !== '.' && rightCh !== '#');
+  const leftHasFloor = leftCh !== '.' && leftCh !== '#';
+
+  // 1. Underside shadow & 3D corbel brackets (only when not sitting directly on a wall)
+  if (belowCh !== '#') {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
+    ctx.fillRect(fx, yBot, W + extraRightW, 2);
+    if (!isLoose && r < ROWS - 1) {
+      for (const cxOff of [2, W - 6]) {
+        ctx.fillStyle = theme.wallDark;
+        ctx.fillRect(fx + cxOff, yBot, 3, 3);
+        ctx.fillStyle = theme.floorFace;
+        ctx.fillRect(fx + cxOff, yBot, 1, 2);
+        fillQuad(
+          ctx,
+          fx + cxOff + 3, yBot,
+          fx + cxOff + 6, yBot - 3,
+          fx + cxOff + 6, yBot,
+          fx + cxOff + 3, yBot + 3,
+          theme.floorSideBack
+        );
+      }
+    }
+  }
+
+  // 2. Lit 9px RIGHT SIDE face of slab (visible when open air or loose floor sits to the right)
+  if (!rightIsWall && !rightHasFloor) {
+    const sg = ctx.createLinearGradient(fx + W, yF, fx + W + ISO_DX, yF);
+    sg.addColorStop(0, theme.floorSide);
+    sg.addColorStop(1, theme.floorSideBack);
+    fillQuad(
+      ctx,
+      fx + W, yF,
+      fx + W + ISO_DX, yB,
+      fx + W + ISO_DX, yBotB,
+      fx + W, yBot,
+      sg
+    );
+    drawIsoLine(ctx, fx + W, yBot - 0.5, fx + W + ISO_DX, yBotB - 0.5, 'rgba(0,0,0,0.45)', 1);
+  }
+
+  // 3. Lit TOP face (oblique parallelogram receding +9 right, -8 up; meets right wall reveal seamlessly)
+  const rxFront = fx + W + extraRightW;
+  const rxBack = rightIsWall ? fx + W : fx + W + ISO_DX;
+  const tg = ctx.createLinearGradient(fx, yB, fx, yF);
+  tg.addColorStop(0, theme.floorTopBack);
+  tg.addColorStop(0.65, theme.floorTop);
+  tg.addColorStop(1, theme.floorTopHi);
+  fillQuad(ctx, fx, yF, fx + ISO_DX, yB, rxBack, yB, rxFront, yF, tg);
+
+  // Subtle back-wall ambient occlusion strip along the very back of the top face
+  fillQuad(ctx, fx + ISO_DX - 1, yB + 2, fx + ISO_DX, yB, rxBack, yB, rxBack - 1, yB + 2, 'rgba(0,0,0,0.26)');
+
+  // Oblique tile stone joints on top face
+  if (leftHasFloor || leftCh === '#') {
+    drawIsoLine(ctx, fx + 0.5, yF, fx + ISO_DX + 0.5, yB, 'rgba(0,0,0,0.24)', 1);
+  }
+  const midBackX = Math.min(rxBack, fx + 16 + ISO_DX);
+  drawIsoLine(ctx, fx + 16, yF, midBackX, yB, 'rgba(0,0,0,0.14)', 1);
+  // Mid-depth horizontal paving course line
+  const midY = Math.round((yF + yB) * 0.5);
+  const midX0 = fx + Math.round(ISO_DX * 0.5);
+  const midX1 = rightIsWall ? Math.round((rxFront + rxBack) * 0.5) : midX0 + W;
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.fillRect(midX0, midY, Math.max(0, midX1 - midX0), 1);
+
+  // Cast shadow onto floor top face from a wall standing immediately to the right (shadow side)
+  if (rightIsWall) {
+    const shG = ctx.createLinearGradient(rxFront, 0, rxFront - 12, 0);
+    shG.addColorStop(0, 'rgba(0,0,0,0.34)');
+    shG.addColorStop(1, 'rgba(0,0,0,0)');
+    fillQuad(ctx, rxFront, yF, rxBack, yB, Math.max(fx + ISO_DX, rxBack - 10), yB, Math.max(fx, rxFront - 12), yF, shG);
+  }
+  // Subtle contact shadow crease where a left-side wall meets this floor slab
+  if (leftCh === '#') {
+    const lG = ctx.createLinearGradient(fx, 0, fx + 6, 0);
+    lG.addColorStop(0, 'rgba(0,0,0,0.28)');
+    lG.addColorStop(1, 'rgba(0,0,0,0)');
+    fillQuad(ctx, fx, yF, fx + ISO_DX, yB, fx + ISO_DX + 5, yB, fx + 5, yF, lG);
+  }
+
+  // Crisp 1px bright edge highlight along exposed left edge (next to open air)
+  if (leftCh === '.') {
+    drawIsoLine(ctx, fx + 0.5, yF, fx + ISO_DX + 0.5, yB, 'rgba(255,255,255,0.26)', 1);
+  }
+
+  // Ice specular streaks in Level 9 (Jungfraujoch Ice Palace)
+  if (level.ice && ch === '_') {
+    drawIsoLine(ctx, fx + 5, yF - 1, fx + 13, yB + 1, 'rgba(235, 250, 255, 0.55)', 1.5);
+    drawIsoLine(ctx, fx + 19, yF - 1, fx + 27, yB + 2, 'rgba(235, 250, 255, 0.42)', 1);
+  }
+
+  // Loose floor top-face jagged cracks
+  if (isLoose) {
+    ctx.strokeStyle = '#07090d';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(fx + 9, yF);
+    ctx.lineTo(fx + 11, yF - 3);
+    ctx.lineTo(fx + 16, yF - 5);
+    ctx.lineTo(fx + 17, yB);
+    ctx.moveTo(fx + 21, yF);
+    ctx.lineTo(fx + 24, yF - 4);
+    ctx.lineTo(fx + 29, yB);
+    ctx.moveTo(fx + 11, yF - 3);
+    ctx.lineTo(fx + 18, yF - 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(240, 228, 198, 0.55)';
+    ctx.fillRect(fx + 12, yF - 4, 2, 1);
+    ctx.fillRect(fx + 25, yF - 5, 2, 1);
+  }
+
+  const edgeFlags = getSlabEdgeFlags(level, room, c, r);
+
+  // 4. FRONT face (includes crisp brass corner brackets on climbable/drop ledges)
+  drawFloorSlabFront(ctx, fx, fyy, theme, { isLoose, leftHasFloor, extraRightW, ...edgeFlags });
+
+  // 5. Oblique top-face ledge trim along edges bordering open air ('.')
+  if (edgeFlags.climbLeft || edgeFlags.dropLeft) {
+    const ex = fx;
+    if (edgeFlags.climbLeft) {
+      const lg = ctx.createRadialGradient(ex + 3, yF - 3, 1, ex + 3, yF - 3, 9);
+      lg.addColorStop(0, 'rgba(255, 234, 165, 0.24)');
+      lg.addColorStop(1, 'rgba(255, 234, 165, 0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(ex - 6, yB - 4, 18, 16);
+      fillQuad(ctx, ex, yF, ex + ISO_DX, yB, ex + 3 + ISO_DX, yB, ex + 3, yF, theme.floorTrim);
+      drawIsoLine(ctx, ex + 0.5, yF, ex + ISO_DX + 0.5, yB, '#fff3cf', 1.1);
+    } else {
+      drawIsoLine(ctx, ex + 0.5, yF, ex + ISO_DX + 0.5, yB, theme.floorTrim, 1.2);
+    }
+  }
+  if (edgeFlags.climbRight || edgeFlags.dropRight) {
+    const ex = fx + W;
+    if (edgeFlags.climbRight) {
+      const lg = ctx.createRadialGradient(ex + 2, yF - 3, 1, ex + 2, yF - 3, 9);
+      lg.addColorStop(0, 'rgba(255, 234, 165, 0.24)');
+      lg.addColorStop(1, 'rgba(255, 234, 165, 0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(ex - 7, yB - 4, 18, 16);
+      fillQuad(ctx, ex - 3, yF, ex - 3 + ISO_DX, yB, ex + ISO_DX, yB, ex, yF, theme.floorTrim);
+      drawIsoLine(ctx, ex - 0.5, yF, ex + ISO_DX - 0.5, yB, '#fff3cf', 1.1);
+    } else {
+      drawIsoLine(ctx, ex - 0.5, yF, ex + ISO_DX - 0.5, yB, theme.floorTrim, 1.2);
+    }
+  }
+}
+
+function drawStaticRoomBase(ctx, level, room, theme) {
+  // 1. Back-wall depth pushback: subtle vertical atmospheric darkening & corner ambient occlusion
+  for (let r = 0; r < ROWS; r++) {
+    const topY = r * TILE_H;
+    const fy = floorY(r);
+    const yB = fy + SLAB_FRONT_OFF + ISO_DY; // where floor top meets back wall
+
+    const vg = ctx.createLinearGradient(0, topY, 0, topY + TILE_H);
+    vg.addColorStop(0, 'rgba(0, 0, 0, 0.24)');
+    vg.addColorStop(0.28, 'rgba(0, 0, 0, 0.08)');
+    vg.addColorStop(0.72, 'rgba(0, 0, 0, 0.10)');
+    vg.addColorStop(1, 'rgba(0, 0, 0, 0.24)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, topY, VIEW_W, TILE_H);
+
+    for (let c = 0; c < COLS; c++) {
+      if (room.grid[r][c] === '#') continue;
+      const aboveCh = level.getTile(room.id, c, r - 1);
+      const hasCeil = aboveCh !== '.';
+      const hasFlr = isStaticWalkable(room.grid[r][c]);
+      const bx = c * TILE_W + ISO_DX;
+
+      if (hasCeil && hasFlr && (c % 3 === 1)) {
+        ctx.fillStyle = theme.pilasterFill;
+        ctx.fillRect(bx + 1, topY, 5, Math.max(0, yB - topY));
+        ctx.fillStyle = theme.pilasterHi;
+        ctx.fillRect(bx + 1, topY, 1, Math.max(0, yB - topY));
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(bx + 6, topY, 2, Math.max(0, yB - topY));
+      }
+
+      // Ceiling-to-back-wall ambient occlusion under overhead slabs/walls
+      if (hasCeil) {
+        const cg = ctx.createLinearGradient(0, topY - 1, 0, topY + 9);
+        cg.addColorStop(0, 'rgba(0, 0, 0, 0.48)');
+        cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = cg;
+        ctx.fillRect(c * TILE_W, topY - 1, TILE_W + ISO_DX, 10);
+      }
+
+      // Floor-to-back-wall ambient occlusion rising from back edge of floor top face
+      if (hasFlr) {
+        const fg = ctx.createLinearGradient(0, yB - 8, 0, yB + 1);
+        fg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        fg.addColorStop(1, 'rgba(0, 0, 0, 0.46)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(bx, yB - 8, TILE_W, 9);
+      }
+    }
+
+    // Wall-to-back-wall ambient occlusion on BOTH left-wall back corners and right-wall back corners
+    for (let c = -1; c < COLS; c++) {
+      if (level.getTile(room.id, c, r) === '#' && level.getTile(room.id, c + 1, r) !== '#') {
+        const sx = (c + 1) * TILE_W + ISO_DX;
+        const wg = ctx.createLinearGradient(sx, 0, sx + 9, 0);
+        wg.addColorStop(0, 'rgba(0, 0, 0, 0.44)');
+        wg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = wg;
+        ctx.fillRect(sx, topY, 9, TILE_H);
+      }
+      if (c > 0 && tileHasLeftReveal(level, room, c, r) && level.getTile(room.id, c - 1, r) !== '#') {
+        const sx = c * TILE_W;
+        const wg = ctx.createLinearGradient(sx, 0, sx - 8, 0);
+        wg.addColorStop(0, 'rgba(0, 0, 0, 0.42)');
+        wg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = wg;
+        ctx.fillRect(sx - 8, topY, 8, TILE_H);
+      }
+    }
+  }
+
+  // 2. Ceiling overhang slabs & upward shaft openings when room links upward
+  if (room.links.up !== null) {
+    const upRoom = level.getRoom(room.links.up);
+    if (upRoom) {
+      for (let c = -1; c < COLS; c++) {
+        const upCh = c < 0 ? level.getTile(room.links.up, c, ROWS - 1) : upRoom.grid[ROWS - 1][c];
+        const nextUpCh = level.getTile(room.links.up, c + 1, ROWS - 1);
+        const x = c * TILE_W;
+        if (upCh !== '.') {
+          ctx.fillStyle = theme.wallSoffitBack;
+          ctx.fillRect(x, 0, TILE_W, 4);
+          ctx.fillStyle = upCh === '#' ? theme.wallFill : theme.floorFace;
+          ctx.fillRect(x, 0, TILE_W, 2);
+          ctx.fillStyle = theme.floorDark;
+          ctx.fillRect(x, 3, TILE_W, 1);
+          // 3D right side bevel at ceiling shaft opening
+          if (nextUpCh === '.') {
+            fillQuad(ctx, x + TILE_W, 0, x + TILE_W + 5, 0, x + TILE_W + 5, 2, x + TILE_W, 4, theme.floorSide);
+          }
+        } else if (c >= 0) {
+          const sg = ctx.createLinearGradient(0, 0, 0, 22);
+          sg.addColorStop(0, 'rgba(200, 225, 255, 0.14)');
+          sg.addColorStop(1, 'rgba(200, 225, 255, 0)');
+          ctx.fillStyle = sg;
+          ctx.fillRect(x + 2, 0, TILE_W - 4, 22);
+
+          const leftCh = level.getTile(room.links.up, c - 1, ROWS - 1);
+          const rightCh = level.getTile(room.links.up, c + 1, ROWS - 1);
+          if (leftCh !== '#' && level.hasFloor(room.links.up, c - 1, ROWS - 1)) {
+            ctx.fillStyle = theme.floorTrim;
+            ctx.fillRect(x - 3, 0, 4, 3);
+            ctx.fillStyle = '#fff3cf';
+            ctx.fillRect(x - 2, 1, 2, 1);
+          }
+          if (rightCh !== '#' && level.hasFloor(room.links.up, c + 1, ROWS - 1)) {
+            ctx.fillStyle = theme.floorTrim;
+            ctx.fillRect(x + TILE_W - 1, 0, 4, 3);
+            ctx.fillStyle = '#fff3cf';
+            ctx.fillRect(x + TILE_W, 1, 2, 1);
+          }
+        }
+      }
+    }
+  }
+
+  // 3. All static walls, pillars, and non-loose floor slabs in strict painter's order:
+  //    bottom-to-top by row (r = ROWS - 1 .. 0), left-to-right by column (c = -1 .. COLS - 1).
+  for (let r = ROWS - 1; r >= 0; r--) {
+    const fy = floorY(r);
+    for (let c = -1; c < COLS; c++) {
+      const ch = c < 0 ? level.getTile(room.id, c, r) : room.grid[r][c];
+      if (ch === '.') continue;
+      if (ch === '#') {
+        drawWallBlock(ctx, level, room, c, r, theme);
+        continue;
+      }
+      if (c >= 0 && ch === 'L') continue;
+      drawFloorSlab(ctx, level, room, c, r, c * TILE_W, fy, theme, {
+        isLoose: false,
+        isStaticPass: true,
+        ch,
+      });
+    }
+  }
+}
+
+function drawStaticRoomFg(ctx, level, room, theme) {
+  // Foreground solid wall FRONT faces ONLY (never wall side faces or inner reveals, so characters
+  // standing near a wall always draw cleanly in front of the wall's recessed side reveal!)
+  for (let r = ROWS - 1; r >= 0; r--) {
+    const topY = r * TILE_H;
+    for (let c = 0; c < COLS; c++) {
+      if (room.grid[r][c] !== '#') continue;
+      const geom = getWallGeom(level, room, c, r);
+      drawWallFrontFace(ctx, c * TILE_W, topY, theme, geom, c, r);
+    }
+  }
+  // Ceiling overhang front lip
+  if (room.links.up !== null) {
+    const upRoom = level.getRoom(room.links.up);
+    if (upRoom) {
+      for (let c = 0; c < COLS; c++) {
+        const upCh = upRoom.grid[ROWS - 1][c];
+        if (upCh === '.') continue;
+        const x = c * TILE_W;
+        ctx.fillStyle = upCh === '#' ? theme.wallFill : theme.floorFace;
+        ctx.fillRect(x, 0, TILE_W, 2);
+        ctx.fillStyle = theme.floorDark;
+        ctx.fillRect(x, 2, TILE_W, 1);
+      }
+    }
+  }
+}
+
+function getStaticRoomLayers(level, room, theme) {
+  const key = `${level.id}:${room.id}`;
+  let entry = roomStaticCache.get(key);
+  if (entry) return entry;
+
+  const base = createOffscreen(VIEW_W, PLAY_H);
+  const fg = createOffscreen(VIEW_W, PLAY_H);
+  if (!base || !fg) {
+    return null;
+  }
+
+  base.ctx.imageSmoothingEnabled = false;
+  fg.ctx.imageSmoothingEnabled = false;
+  drawStaticRoomBase(base.ctx, level, room, theme);
+  drawStaticRoomFg(fg.ctx, level, room, theme);
+
+  entry = { baseCanvas: base.canvas, fgCanvas: fg.canvas };
+  if (roomStaticCache.size >= MAX_ROOM_CACHE) {
+    const oldest = roomStaticCache.keys().next().value;
+    roomStaticCache.delete(oldest);
+  }
+  roomStaticCache.set(key, entry);
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
 // Room Tiles, Props, Items, HUD, Overlays
 // ---------------------------------------------------------------------------
 
@@ -744,7 +1696,7 @@ export function renderGame(ctx, game) {
 
   const room = level.getRoom(player.roomId);
   if (!room) return;
-  const theme = LEVEL_THEMES[level.id % LEVEL_THEMES.length];
+  const theme = getIsoTheme(level.id);
 
   // Camera shake
   ctx.save();
@@ -753,50 +1705,72 @@ export function renderGame(ctx, game) {
     ctx.translate((Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2);
   }
 
-  // 1. Procedural backdrop behind tiles (full 384x216 clipped to play area)
+  // 1. Procedural backdrop behind tiles (full 384x192 clipped to play area)
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, VIEW_W, PLAY_H);
   ctx.clip();
   drawBackdrop(ctx, level.id, VIEW_W, PLAY_H, time, room.seed);
 
-  // 2. Back-layer room decor (torches, banners, signage, Celine in L5)
-  drawDecor(ctx, room, theme, time, level.id);
-
-  // 3. Tiles (walls, floors, plates, exit doors, loose floors, spikes, mirror)
-  drawRoomTiles(ctx, level, room, theme, time);
-
-  // 4. Collectible items (sword, elixirs)
-  drawItems(ctx, room, time);
-
-  // 5. Falling loose-floor debris
-  for (const d of level.fallingDebris) {
-    if (d.roomId !== room.id) continue;
-    ctx.fillStyle = theme.floorFace;
-    ctx.fillRect(Math.round(d.x - 14), Math.round(d.y), 28, FLOOR_THICK);
-    ctx.fillStyle = theme.floorTop;
-    ctx.fillRect(Math.round(d.x - 14), Math.round(d.y), 28, 2);
+  // 2. Cached static 2.5D room geometry (back-wall pushback/AO, pilasters, walls, pillars, static slabs)
+  const cached = getStaticRoomLayers(level, room, theme);
+  if (cached) {
+    ctx.drawImage(cached.baseCanvas, 0, 0);
+  } else {
+    drawStaticRoomBase(ctx, level, room, theme);
   }
 
-  // 6. Enemies & foreground NPCs (Celine) in this room
+  // 3. Back-wall decor (torches/lamps with floor light pools, banners, signs, notes, 3D CRT, console)
+  drawDecor(ctx, level, room, theme, time, level.id);
+
+  // 4. Dynamic floor-plane objects (loose floors, plates, recessed exit doors, spikes, back frames of gates/slicers/mirror)
+  drawDynamicRoomElements(ctx, level, room, theme, time);
+
+  // 5. Collectible items resting on the floor's top face (sword, elixirs)
+  drawItems(ctx, room, time);
+
+  // 6. Falling loose-floor debris (3D oblique slabs)
+  for (const d of level.fallingDebris) {
+    if (d.roomId !== room.id) continue;
+    const dx = Math.round(d.x - 14);
+    const dy = Math.round(d.y);
+    const dw = 28;
+    const yF = dy + SLAB_FRONT_OFF;
+    const yB = yF + ISO_DY;
+    fillQuad(ctx, dx + dw, yF, dx + dw + ISO_DX, yB, dx + dw + ISO_DX, yB + SLAB_FRONT_H, dx + dw, yF + SLAB_FRONT_H, theme.floorSide);
+    fillQuad(ctx, dx, yF, dx + ISO_DX, yB, dx + dw + ISO_DX, yB, dx + dw, yF, theme.floorTop);
+    ctx.fillStyle = theme.floorFace;
+    ctx.fillRect(dx, yF, dw, SLAB_FRONT_H);
+    ctx.fillStyle = theme.floorEdgeBevel;
+    ctx.fillRect(dx, yF, dw, 1);
+  }
+
+  // 7. Enemies, Celine NPC, and Player
   for (const enemy of enemies) {
     if (enemy.roomId !== room.id) continue;
     if (!enemy.alive && enemy.animT >= 1 && enemy.hiddenAfterDeath) continue;
     drawCharacter(ctx, enemy, time);
   }
   drawForegroundDecor(ctx, room, time);
-
-  // 7. Player
   drawCharacter(ctx, player, time);
 
-  // 8. Foreground gates, slicers & Alpine Foehn wind streaks
+  // 8. Foreground depth occluders: solid wall fronts + ceiling lip + foreground slab fronts
+  //    (so jumping heads pass behind overhead slab fronts, while active climbing/hanging ledge is never clipped)
+  if (cached) {
+    ctx.drawImage(cached.fgCanvas, 0, 0);
+  } else {
+    drawStaticRoomFg(ctx, level, room, theme);
+  }
+  drawForegroundSlabFronts(ctx, level, room, player, theme, time);
+
+  // 9. Foreground 3D gates, slicers, mirror front & Alpine Foehn wind streaks
   drawRoomForegroundTraps(ctx, level, room, theme, time);
   drawWindOverlay(ctx, level, room, time);
 
-  // 8b. Climb cue: when the hero can climb from where he stands, mark the ledge corner.
+  // 9b. Climb cue: when the hero can climb from where he stands, mark the 3D ledge corner
   drawClimbCue(ctx, level, player, time);
 
-  // 9. Particles (sparks, dust, shatter)
+  // 10. Particles (sparks, dust, shatter)
   for (const pt of level.particles) {
     if (pt.roomId !== room.id) continue;
     ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
@@ -805,7 +1779,7 @@ export function renderGame(ctx, game) {
   }
   ctx.globalAlpha = 1;
 
-  // 10. Room hint / floating banner inside play area (crisp pixel font with auto-wrap)
+  // 11. Room hint / floating banner inside play area (crisp pixel font with auto-wrap)
   if (game.bannerTimer > 0 && game.bannerText) {
     const alpha = Math.min(1, game.bannerTimer * 2);
     const wrapped = wrapPixelText(game.bannerText, 64);
@@ -835,10 +1809,10 @@ export function renderGame(ctx, game) {
   ctx.restore(); // end playfield clip
   ctx.restore(); // end shake
 
-  // 11. Bottom HUD Bar (y = 192..216)
+  // 12. Bottom HUD Bar (y = 192..216)
   drawHUD(ctx, game);
 
-  // 12. Overlays (Pause or Death prompt)
+  // 13. Overlays (Pause or Death prompt)
   if (mode === 'paused') {
     drawPauseOverlay(ctx, game);
   } else if (mode === 'dead') {
@@ -857,7 +1831,7 @@ function drawClimbCue(ctx, level, player, time) {
   const ly = ledge.crossUp ? 0 : floorY(ledge.row);
   const pulse = 0.55 + 0.45 * Math.sin(time * 6);
   const ax = cornerX - ledge.facing * 7;
-  const ay = Math.max(6, ly - 9 - Math.round(pulse * 2));
+  const ay = Math.max(6, ly - 10 - Math.round(pulse * 2));
   ctx.save();
   ctx.globalAlpha = 0.5 + 0.45 * pulse;
   ctx.fillStyle = '#fff1c2';
@@ -866,155 +1840,252 @@ function drawClimbCue(ctx, level, player, time) {
   ctx.fillRect(ax - 2, ay + 1, 4, 1);
   ctx.fillRect(ax - 3, ay + 2, 2, 1);
   ctx.fillRect(ax + 1, ay + 2, 2, 1);
-  ctx.globalAlpha = 0.35 * pulse;
-  ctx.fillRect(cornerX - (ledge.facing > 0 ? 6 : 0), ly - 1, 6, 2);
+  ctx.globalAlpha = 0.42 * pulse;
+  if (ledge.crossUp) {
+    ctx.fillRect(cornerX - (ledge.facing > 0 ? 6 : 0), 0, 6, 2);
+  } else {
+    // Highlight hugs the oblique 3D ledge edge
+    const yF = ly + SLAB_FRONT_OFF;
+    drawIsoLine(ctx, cornerX, yF, cornerX + ISO_DX, yF + ISO_DY, '#fff1c2', 1.6);
+    ctx.fillRect(cornerX - (ledge.facing > 0 ? 0 : 6), yF - 1, 6, 2);
+  }
   ctx.restore();
 }
 
-function drawDecor(ctx, room, theme, time, levelId) {
+function drawFloorLightPool(ctx, cx, fy, innerRgba, outerRgba, rx = 20, ry = 3.6) {
+  ctx.save();
+  ctx.transform(1, 0, ISO_DX / ISO_DY, 1, cx + 2.5, fy - 2.0);
+  const g = ctx.createRadialGradient(0, 0, 1, 0, 0, rx);
+  g.addColorStop(0, innerRgba);
+  g.addColorStop(0.55, innerRgba);
+  g.addColorStop(1, outerRgba);
+  ctx.fillStyle = g;
+  ctx.scale(1, ry / rx);
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawDecor(ctx, level, room, theme, time, levelId) {
   for (const d of room.decor) {
     const cx = tileCenterX(d.col);
     const fy = floorY(d.row);
+    // Back-wall anchor point (receded into z = 1 plane)
+    const bx = cx + ISO_DX;
+    const bfy = fy + ISO_DY;
+    const hasFloorHere = level.hasFloor(room.id, d.col, d.row);
+
     if (d.type === 'torch') {
-      const ty = fy - 24;
+      const ty = bfy - 18;
       if (levelId === 5) {
-        // CERN cryo-photonic wall lamp (cool cyan LED bar)
-        ctx.fillStyle = '#1e2c44';
-        ctx.fillRect(cx - 5, ty - 2, 10, 5);
+        // CERN cryo-photonic wall lamp (cool cyan LED bar) on back wall
         const pulse = 0.85 + 0.15 * Math.sin(time * 7 + d.col);
-        const g = ctx.createRadialGradient(cx, ty, 1, cx, ty, 20);
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, `rgba(70, 220, 255, ${(0.22 * pulse).toFixed(2)})`, 'rgba(40, 150, 255, 0)');
+        }
+        ctx.fillStyle = '#121d30';
+        ctx.fillRect(bx - 6, ty - 2, 12, 6);
+        ctx.fillStyle = '#253957';
+        ctx.fillRect(bx - 5, ty - 2, 10, 4);
+        const g = ctx.createRadialGradient(bx, ty, 1, bx, ty, 20);
         g.addColorStop(0, `rgba(70, 220, 255, ${(0.32 * pulse).toFixed(2)})`);
         g.addColorStop(1, 'rgba(40, 150, 255, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 22, ty - 20, 44, 40);
+        ctx.fillRect(bx - 22, ty - 20, 44, 40);
         ctx.fillStyle = '#68e8ff';
-        ctx.fillRect(cx - 4, ty - 1, 8, 2);
+        ctx.fillRect(bx - 4, ty - 1, 8, 2);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(cx - 2, ty - 1, 4, 1);
+        ctx.fillRect(bx - 2, ty - 1, 4, 1);
       } else if (levelId === 3) {
         // Grande Dixence damp hydro fluorescent tube
-        ctx.fillStyle = '#253844';
-        ctx.fillRect(cx - 6, ty - 2, 12, 4);
-        const g = ctx.createRadialGradient(cx, ty, 1, cx, ty, 22);
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, 'rgba(95, 212, 226, 0.20)', 'rgba(40, 140, 160, 0)');
+        }
+        ctx.fillStyle = '#192832';
+        ctx.fillRect(bx - 7, ty - 2, 14, 5);
+        ctx.fillStyle = '#2e4554';
+        ctx.fillRect(bx - 6, ty - 2, 12, 3);
+        const g = ctx.createRadialGradient(bx, ty, 1, bx, ty, 22);
         g.addColorStop(0, 'rgba(95, 212, 226, 0.30)');
         g.addColorStop(1, 'rgba(40, 140, 160, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 22, ty - 22, 44, 44);
+        ctx.fillRect(bx - 22, ty - 22, 44, 44);
         ctx.fillStyle = '#7de0ee';
-        ctx.fillRect(cx - 5, ty - 1, 10, 2);
+        ctx.fillRect(bx - 5, ty - 1, 10, 2);
       } else if (levelId === 6) {
-        // Bundeshaus green-shaded federal accountant lamp
+        // Bundeshaus green-shaded federal accountant lamp on back wall
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, 'rgba(130, 220, 155, 0.22)', 'rgba(80, 160, 100, 0)');
+        }
+        ctx.fillStyle = '#5c4920';
+        ctx.fillRect(bx - 2, ty + 2, 4, 5);
         ctx.fillStyle = '#7a632c';
-        ctx.fillRect(cx - 1, ty, 2, 6);
+        ctx.fillRect(bx - 1, ty, 2, 6);
         ctx.fillStyle = '#1d6b42';
-        ctx.fillRect(cx - 5, ty - 3, 10, 4);
-        const g = ctx.createRadialGradient(cx, ty + 2, 1, cx, ty + 4, 22);
+        ctx.fillRect(bx - 5, ty - 3, 10, 4);
+        ctx.fillStyle = '#2c8a58';
+        ctx.fillRect(bx - 4, ty - 3, 8, 1);
+        const g = ctx.createRadialGradient(bx, ty + 2, 1, bx, ty + 4, 22);
         g.addColorStop(0, 'rgba(130, 220, 155, 0.30)');
         g.addColorStop(1, 'rgba(80, 160, 100, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 22, ty - 16, 44, 40);
+        ctx.fillRect(bx - 22, ty - 16, 44, 40);
         ctx.fillStyle = '#d8f5bc';
-        ctx.fillRect(cx - 3, ty + 1, 6, 1);
+        ctx.fillRect(bx - 3, ty + 1, 6, 1);
       } else if (levelId === 8) {
         // Jungfraujoch frosted crystal ice lantern
-        ctx.fillStyle = '#365e82';
-        ctx.fillRect(cx - 3, ty - 6, 6, 2);
-        ctx.fillRect(cx - 3, ty + 2, 6, 2);
-        const g = ctx.createRadialGradient(cx, ty - 1, 1, cx, ty - 1, 22);
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, 'rgba(170, 238, 255, 0.24)', 'rgba(90, 180, 240, 0)');
+        }
+        ctx.fillStyle = '#264561';
+        ctx.fillRect(bx - 3, ty - 6, 6, 2);
+        ctx.fillRect(bx - 3, ty + 2, 6, 2);
+        const g = ctx.createRadialGradient(bx, ty - 1, 1, bx, ty - 1, 22);
         g.addColorStop(0, 'rgba(170, 238, 255, 0.34)');
         g.addColorStop(1, 'rgba(90, 180, 240, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 22, ty - 22, 44, 44);
+        ctx.fillRect(bx - 22, ty - 22, 44, 44);
         ctx.fillStyle = '#9be8ff';
-        ctx.fillRect(cx - 2, ty - 4, 4, 6);
+        ctx.fillRect(bx - 2, ty - 4, 4, 6);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(cx - 1, ty - 3, 2, 4);
+        ctx.fillRect(bx - 1, ty - 3, 2, 4);
       } else if (levelId === 9 || levelId === 7) {
-        // Sphinx / Eigerwand alpine summit floodlight on mast
-        ctx.fillStyle = '#485266';
-        ctx.fillRect(cx - 1, fy - 24, 2, 24);
-        ctx.fillStyle = '#252c38';
-        ctx.fillRect(cx - 4, fy - 27, 8, 4);
-        const g = ctx.createRadialGradient(cx, fy - 25, 1, cx, fy - 18, 26);
+        // Sphinx / Eigerwand alpine summit floodlight on back-wall mast
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, 'rgba(255, 242, 195, 0.26)', 'rgba(255, 220, 140, 0)', 20, 3.8);
+        }
+        ctx.fillStyle = '#384152';
+        ctx.fillRect(bx - 1, bfy - 22, 2, 22);
+        ctx.fillStyle = '#1e2430';
+        ctx.fillRect(bx - 4, bfy - 25, 8, 4);
+        const g = ctx.createRadialGradient(bx, bfy - 23, 1, bx, bfy - 16, 26);
         g.addColorStop(0, 'rgba(255, 242, 195, 0.36)');
         g.addColorStop(1, 'rgba(255, 220, 140, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 26, fy - 42, 52, 46);
+        ctx.fillRect(bx - 26, bfy - 40, 52, 46);
         ctx.fillStyle = '#fff5cc';
-        ctx.fillRect(cx - 3, fy - 26, 6, 2);
+        ctx.fillRect(bx - 3, bfy - 24, 6, 2);
       } else {
         // Classic Paradeplatz / Olten / Gotthard / Chillon warm wall sconce
-        ctx.fillStyle = '#4a3a22';
-        ctx.fillRect(cx - 1, ty, 2, 8);
         const flick = Math.sin(time * 13 + d.col * 3) * 1.5;
-        const g = ctx.createRadialGradient(cx, ty - 2, 1, cx, ty - 2, 20 + flick);
+        if (hasFloorHere) {
+          drawFloorLightPool(ctx, cx, fy, `rgba(255, 195, 85, ${(0.22 + flick * 0.015).toFixed(2)})`, 'rgba(255, 120, 30, 0)');
+        }
+        // Back wall iron mounting plate & angled bracket
+        ctx.fillStyle = '#292014';
+        ctx.fillRect(bx - 2, ty + 2, 4, 6);
+        ctx.fillStyle = '#5c4728';
+        ctx.fillRect(bx - 1, ty, 2, 7);
+        const g = ctx.createRadialGradient(bx, ty - 2, 1, bx, ty - 2, 20 + flick);
         g.addColorStop(0, 'rgba(255, 200, 90, 0.35)');
         g.addColorStop(1, 'rgba(255, 120, 30, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(cx - 22, ty - 24, 44, 44);
+        ctx.fillRect(bx - 22, ty - 24, 44, 44);
         ctx.fillStyle = '#ff9824';
-        ctx.fillRect(cx - 2, ty - 4, 4, 4);
+        ctx.fillRect(bx - 2, ty - 4, 4, 4);
         ctx.fillStyle = '#fff0a0';
-        ctx.fillRect(cx - 1, ty - 3, 2, 2);
+        ctx.fillRect(bx - 1, ty - 3, 2, 2);
       }
     } else if (d.type === 'crt') {
-      // 1979 Reduit amber copper-line CRT terminal
+      // 1979 Reduit amber copper-line CRT terminal with 3D oblique cabinet sitting on top face
+      const tx = cx - 6;
+      const tyBase = fy - 2;
+      // Skewed floor shadow
+      ctx.save();
+      ctx.transform(1, 0, ISO_DX / ISO_DY, 1, cx + 2, fy - 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.34)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 8, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // Pedestal (front + shadow right side)
+      ctx.fillStyle = '#38403b';
+      ctx.fillRect(tx + 3, tyBase - 7, 8, 7);
+      fillQuad(ctx, tx + 11, tyBase - 7, tx + 14, tyBase - 11, tx + 14, tyBase - 4, tx + 11, tyBase, '#1e2420');
+      // Monitor body (top face + right side + front bezel)
+      fillQuad(ctx, tx, tyBase - 20, tx + 3, tyBase - 24, tx + 17, tyBase - 24, tx + 14, tyBase - 20, '#4a544e');
+      fillQuad(ctx, tx + 14, tyBase - 20, tx + 17, tyBase - 24, tx + 17, tyBase - 11, tx + 14, tyBase - 7, '#1b211e');
       ctx.fillStyle = '#2b322e';
-      ctx.fillRect(cx - 8, fy - 22, 16, 14);
+      ctx.fillRect(tx, tyBase - 20, 14, 13);
       ctx.fillStyle = '#121a14';
-      ctx.fillRect(cx - 6, fy - 20, 12, 9);
+      ctx.fillRect(tx + 2, tyBase - 18, 10, 8);
       const blink = Math.sin(time * 5) > 0;
       ctx.fillStyle = '#e8a838';
-      ctx.fillRect(cx - 5, fy - 18, 9, 1);
-      ctx.fillRect(cx - 5, fy - 15, 7, 1);
-      if (blink) ctx.fillRect(cx - 5, fy - 13, 3, 1);
-      ctx.fillStyle = '#38403b';
-      ctx.fillRect(cx - 4, fy - 8, 8, 8);
+      ctx.fillRect(tx + 3, tyBase - 16, 7, 1);
+      ctx.fillRect(tx + 3, tyBase - 14, 5, 1);
+      if (blink) ctx.fillRect(tx + 3, tyBase - 12, 3, 1);
+      // Warm amber glow pool on floor
+      if (hasFloorHere) {
+        drawFloorLightPool(ctx, cx, fy, 'rgba(232, 168, 56, 0.16)', 'rgba(232, 168, 56, 0)', 12, 2.6);
+      }
     } else if (d.type === 'note') {
-      // Celine's bright yellow scribbled audit note marking true override routes
+      // Celine's bright yellow scribbled audit note pinned to the back wall
+      const ny = bfy - 22;
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';
+      ctx.fillRect(bx - 4, ny + 1, 10, 11);
       ctx.fillStyle = '#f2d95c';
-      ctx.fillRect(cx - 5, fy - 28, 10, 11);
+      ctx.fillRect(bx - 5, ny, 10, 11);
       ctx.fillStyle = '#d9b538';
-      ctx.fillRect(cx - 5, fy - 28, 10, 2);
+      ctx.fillRect(bx - 5, ny, 10, 2);
       ctx.fillStyle = '#2a3326';
-      ctx.fillRect(cx - 3, fy - 24, 6, 1);
-      ctx.fillRect(cx - 3, fy - 22, 5, 1);
-      ctx.fillRect(cx - 3, fy - 20, 6, 1);
-      // Red pin tack
+      ctx.fillRect(bx - 3, ny + 4, 6, 1);
+      ctx.fillRect(bx - 3, ny + 6, 5, 1);
+      ctx.fillRect(bx - 3, ny + 8, 6, 1);
       ctx.fillStyle = '#d62828';
-      ctx.fillRect(cx - 1, fy - 29, 2, 2);
+      ctx.fillRect(bx - 1, ny - 1, 2, 2);
     } else if (d.type === 'banner') {
+      // Swiss banner hanging flat against the recessed back wall
+      const by = bfy - 30;
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';
+      ctx.fillRect(bx - 5, by + 2, 12, 21);
+      ctx.fillStyle = '#4a3a22';
+      ctx.fillRect(bx - 7, by - 1, 14, 2);
       ctx.fillStyle = '#8a1c22';
-      ctx.fillRect(cx - 6, fy - 38, 12, 22);
+      ctx.fillRect(bx - 6, by, 12, 21);
+      ctx.fillStyle = '#a8262e';
+      ctx.fillRect(bx - 6, by, 2, 21);
       ctx.fillStyle = '#f0eee8';
-      ctx.fillRect(cx - 1, fy - 31, 2, 8);
-      ctx.fillRect(cx - 4, fy - 28, 8, 2);
+      ctx.fillRect(bx - 1, by + 6, 2, 8);
+      ctx.fillRect(bx - 4, by + 9, 8, 2);
     } else if (d.type === 'sign') {
-      // Swiss metallic directional/warning plaque with crisp pictogram
+      // Swiss metallic directional/warning plaque mounted on back wall (shifted +3 to avoid right wall edge)
+      const sx = cx + 3;
+      const sy = bfy - 24;
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(sx - 11, sy + 1, 24, 11);
       ctx.fillStyle = '#18202c';
-      ctx.fillRect(cx - 12, fy - 32, 24, 11);
+      ctx.fillRect(sx - 12, sy, 24, 11);
       ctx.strokeStyle = theme.floorTrim;
       ctx.lineWidth = 1;
-      ctx.strokeRect(cx - 11.5, fy - 31.5, 23, 10);
+      ctx.strokeRect(sx - 11.5, sy + 0.5, 23, 10);
       // Mini Swiss red-cross badge on left + hazard/arrow bars on right
       ctx.fillStyle = '#c92830';
-      ctx.fillRect(cx - 9, fy - 29, 5, 5);
+      ctx.fillRect(sx - 9, sy + 3, 5, 5);
       ctx.fillStyle = '#f5f4ef';
-      ctx.fillRect(cx - 7, fy - 28, 1, 3);
-      ctx.fillRect(cx - 8, fy - 27, 3, 1);
-      // Right directional arrow pictogram
+      ctx.fillRect(sx - 7, sy + 4, 1, 3);
+      ctx.fillRect(sx - 8, sy + 5, 3, 1);
       ctx.fillStyle = '#e8c45a';
-      ctx.fillRect(cx - 2, fy - 27, 8, 1);
-      ctx.fillRect(cx + 4, fy - 28, 2, 3);
-      ctx.fillRect(cx + 6, fy - 27, 1, 1);
+      ctx.fillRect(sx - 2, sy + 5, 8, 1);
+      ctx.fillRect(sx + 4, sy + 4, 2, 3);
+      ctx.fillRect(sx + 6, sy + 5, 1, 1);
       ctx.fillStyle = '#9aa8bc';
-      ctx.fillRect(cx - 2, fy - 24, 9, 1);
+      ctx.fillRect(sx - 2, sy + 8, 9, 1);
     } else if (d.type === 'celine') {
-      // Console pedestal behind/beside Celine (Celine character drawn in entity pass)
+      // 3D console pedestal behind/beside Celine resting on the floor's top face
+      const px = cx + 7;
+      const py = fy - 2;
+      fillQuad(ctx, px, py - 17, px + 3, py - 21, px + 14, py - 21, px + 11, py - 17, '#3a4b63');
+      fillQuad(ctx, px + 11, py - 17, px + 14, py - 21, px + 14, py - 4, px + 11, py, '#17202e');
       ctx.fillStyle = '#253142';
-      ctx.fillRect(cx + 8, fy - 18, 12, 18);
+      ctx.fillRect(px, py - 17, 11, 17);
       ctx.fillStyle = '#3bd4ff';
-      ctx.fillRect(cx + 10, fy - 16, 8, 5);
+      ctx.fillRect(px + 2, py - 15, 7, 5);
+      ctx.fillStyle = '#b8f4ff';
+      ctx.fillRect(px + 3, py - 14, 3, 1);
+      if (hasFloorHere) {
+        drawFloorLightPool(ctx, cx + 10, fy, 'rgba(59, 212, 255, 0.20)', 'rgba(59, 212, 255, 0)', 14, 3);
+      }
     }
   }
 }
@@ -1040,378 +2111,517 @@ function drawForegroundDecor(ctx, room, time) {
   }
 }
 
-function drawRoomTiles(ctx, level, room, theme, time) {
-  // Draw ceiling overhang slabs when room links upward so upward climb shafts are unmistakably visible!
-  if (room.links.up !== null) {
-    const upRoom = level.getRoom(room.links.up);
-    if (upRoom) {
-      for (let c = 0; c < COLS; c++) {
-        const upCh = upRoom.grid[ROWS - 1][c];
-        const x = c * TILE_W;
-        if (upCh !== '.') {
-          ctx.fillStyle = theme.wallDark;
-          ctx.fillRect(x, 0, TILE_W, 4);
-          ctx.fillStyle = upCh === '#' ? theme.wallFill : theme.floorFace;
-          ctx.fillRect(x, 0, TILE_W, 2);
-          ctx.fillStyle = theme.floorDark;
-          ctx.fillRect(x, 4, TILE_W, 1);
-        } else {
-          // Subtle upward shaft glow & climbable ledge lip highlight
-          const sg = ctx.createLinearGradient(0, 0, 0, 22);
-          sg.addColorStop(0, 'rgba(200, 225, 255, 0.14)');
-          sg.addColorStop(1, 'rgba(200, 225, 255, 0)');
-          ctx.fillStyle = sg;
-          ctx.fillRect(x + 2, 0, TILE_W - 4, 22);
-
-          // Highlight climbable ledge corners adjacent to this ceiling opening
-          const leftCh = level.getTile(room.links.up, c - 1, ROWS - 1);
-          const rightCh = level.getTile(room.links.up, c + 1, ROWS - 1);
-          if (leftCh !== '#' && level.hasFloor(room.links.up, c - 1, ROWS - 1)) {
-            ctx.fillStyle = theme.floorTrim;
-            ctx.fillRect(x - 3, 0, 4, 3);
-            ctx.fillStyle = '#f5e8c8';
-            ctx.fillRect(x - 2, 1, 2, 1);
-          }
-          if (rightCh !== '#' && level.hasFloor(room.links.up, c + 1, ROWS - 1)) {
-            ctx.fillStyle = theme.floorTrim;
-            ctx.fillRect(x + TILE_W - 1, 0, 4, 3);
-            ctx.fillStyle = '#f5e8c8';
-            ctx.fillRect(x + TILE_W, 1, 2, 1);
-          }
-        }
-      }
-    }
-  }
-
-  for (let r = 0; r < ROWS; r++) {
+function drawDynamicRoomElements(ctx, level, room, theme, time) {
+  // Draw bottom-to-top, left-to-right so overlapping dynamic floor elements sort cleanly
+  for (let r = ROWS - 1; r >= 0; r--) {
     const fy = floorY(r);
     const topY = r * TILE_H;
+    const yF = fy + SLAB_FRONT_OFF;
+    const yB = yF + ISO_DY;
+
     for (let c = 0; c < COLS; c++) {
       const ch = room.grid[r][c];
       const x = c * TILE_W;
 
-      if (ch === '#') {
-        // Solid architectural wall block
-        ctx.fillStyle = theme.wallFill;
-        ctx.fillRect(x, topY, TILE_W, TILE_H);
-        ctx.fillStyle = theme.wallHi;
-        ctx.fillRect(x, topY, TILE_W, 2);
-        ctx.fillRect(x, topY, 2, TILE_H);
-        ctx.fillStyle = theme.wallDark;
-        ctx.fillRect(x + TILE_W - 2, topY, 2, TILE_H);
-        ctx.fillRect(x, topY + TILE_H - 3, TILE_W, 3);
-        // Subtle masonry / panel detail
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.fillRect(x + 3, topY + 15, TILE_W - 6, 1);
-        ctx.fillRect(x + 3, topY + 31, TILE_W - 6, 1);
-        ctx.fillRect(x + 16, topY + 2, 1, 13);
-        ctx.fillRect(x + 8, topY + 16, 1, 15);
-        ctx.fillRect(x + 22, topY + 32, 1, 13);
-        continue;
-      }
-
-      if (ch === '.') continue;
-
-      // Loose floor check
-      let shakeX = 0;
-      let shakeY = 0;
-      let isLoose = false;
+      // 1. Loose Floor ('L') — rendered dynamically so shaking & falling never invalidate static room cache
       if (ch === 'L') {
         const l = room.loose.get(`${c},${r}`);
         if (l && l.state === 'fallen') continue;
-        isLoose = true;
+        let shakeX = 0;
+        let shakeY = 0;
         if (l && l.state === 'shaking') {
           shakeX = Math.sin(time * 55 + c) * 1.4;
           shakeY = Math.cos(time * 47) * 0.9;
         }
-      }
+        const fx = Math.round(x + shakeX);
+        const fyy = Math.round(fy + shakeY);
 
-      // Draw walkable floor slab with 2.5D top plane depth & underside support brackets
-      const fx = Math.round(x + shakeX);
-      const fyy = Math.round(fy + shakeY);
-      // Subtle underside shadow & corbel brackets so floors pop sharply off backdrops
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
-      ctx.fillRect(fx, fyy + FLOOR_THICK, TILE_W, 2);
-      if (!isLoose) {
-        ctx.fillStyle = theme.wallDark;
-        ctx.fillRect(fx + 2, fyy + FLOOR_THICK, 3, 2);
-        ctx.fillRect(fx + TILE_W - 5, fyy + FLOOR_THICK, 3, 2);
-      }
-      ctx.fillStyle = theme.floorFace;
-      ctx.fillRect(fx, fyy, TILE_W, FLOOR_THICK);
-      ctx.fillStyle = theme.floorTop;
-      ctx.fillRect(fx, fyy, TILE_W, 2);
-      // Crisp 1px top highlight bevel for foreground separation
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
-      ctx.fillRect(fx, fyy, TILE_W, 1);
-      ctx.fillStyle = theme.floorDark;
-      ctx.fillRect(fx, fyy + FLOOR_THICK - 1, TILE_W, 1);
-      // Tile stone seam
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
-      ctx.fillRect(fx, fyy + 2, 1, FLOOR_THICK - 2);
+        // Dynamic back-wall AO above intact loose floor
+        const fg = ctx.createLinearGradient(0, yB - 7, 0, yB + 1);
+        fg.addColorStop(0, 'rgba(0,0,0,0)');
+        fg.addColorStop(1, 'rgba(0,0,0,0.40)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(fx + ISO_DX, yB - 7, TILE_W, 8);
 
-      // Ledge lips next to open air ('.'). Lips that can be climbed onto from the floor
-      // below get a bright worn-brass mantle edge so upward routes read at a glance.
-      for (const side of [-1, 1]) {
-        const adjC = c + side;
-        if (level.getTile(room.id, adjC, r) !== '.' || level.hasFloor(room.id, adjC, r)) continue;
-        const climbable = level.hasFloor(room.id, adjC, r + 1) && !level.isWall(room.id, adjC, r + 1);
-        const lx = side < 0 ? fx : fx + TILE_W - 1;
-        const capX = side < 0 ? fx : fx + TILE_W - 5;
-        if (climbable) {
-          ctx.fillStyle = 'rgba(255, 226, 150, 0.16)';
-          ctx.fillRect(side < 0 ? fx - 6 : fx + TILE_W, fyy - 14, 6, 14);
-          ctx.fillStyle = theme.floorTrim;
-          ctx.fillRect(capX, fyy - 1, 5, 4);
-          ctx.fillStyle = '#fff3cf';
-          ctx.fillRect(capX, fyy - 1, 5, 1);
-          ctx.fillRect(lx, fyy, 1, FLOOR_THICK);
-        } else {
-          ctx.fillStyle = theme.floorTrim;
-          ctx.fillRect(side < 0 ? fx : fx + TILE_W - 3, fyy, 3, 2);
-        }
-      }
+        drawFloorSlab(ctx, level, room, c, r, fx, fyy, theme, {
+          isLoose: true,
+          isStaticPass: false,
+          ch: 'L',
+        });
 
-      // Ice specular glint in Level 4
-      if (level.ice && ch === '_') {
-        ctx.fillStyle = 'rgba(235, 250, 255, 0.55)';
-        ctx.fillRect(fx + 4, fyy, 8, 1);
-        ctx.fillRect(fx + 19, fyy + 1, 6, 1);
-      }
-
-      // Loose floor cracks (high-contrast fracture gap + chipped top edge + dust trickle)
-      if (isLoose) {
-        ctx.fillStyle = '#05070a';
-        ctx.fillRect(fx + 1, fyy, 1, FLOOR_THICK);
-        ctx.fillRect(fx + TILE_W - 2, fyy, 1, FLOOR_THICK);
-        ctx.fillRect(fx + 8, fyy, 2, 4);
-        ctx.fillRect(fx + 9, fyy + 3, 3, 2);
-        ctx.fillRect(fx + 20, fyy, 2, 5);
-        ctx.fillRect(fx + 15, fyy + 1, 2, 4);
-        // Chipped bright edge highlight around fractures
-        ctx.fillStyle = '#e8dcc0';
-        ctx.fillRect(fx + 6, fyy, 2, 1);
-        ctx.fillRect(fx + 18, fyy, 2, 1);
-        ctx.fillStyle = theme.floorTrim;
-        ctx.fillRect(fx + 2, fyy + 2, 3, 1);
-        ctx.fillRect(fx + TILE_W - 5, fyy + 2, 3, 1);
         // Periodic falling dust crumb cue beneath loose floor
         const dustPhase = (time * 1.3 + c * 0.37) % 1;
         if (dustPhase < 0.6) {
-          const dy = fyy + FLOOR_THICK + Math.round(dustPhase * 16);
+          const dy = fyy + SLAB_FRONT_OFF + SLAB_FRONT_H + Math.round(dustPhase * 16);
           ctx.fillStyle = 'rgba(215, 205, 185, 0.55)';
           ctx.fillRect(fx + 10 + ((c * 5) % 12), dy, 1, 1);
         }
+        continue;
       }
 
-      // Pressure plates (open P, close Q, and weighted hold-plates)
+      // 2. Pressure plates ('P' open, 'Q' close, weighted hold-plates) — inset 3D slabs on the top face
       if (ch === 'P' || ch === 'Q') {
         const plate = room.plates.get(`${c},${r}`);
         const down = plate && plate.pressed;
-        const py = down ? fyy : fyy - 2;
-        if (plate && plate.hold) {
-          ctx.fillStyle = '#226c75';
-          ctx.fillRect(fx + 4, py, TILE_W - 8, down ? 1 : 2);
-          ctx.fillStyle = '#7ce8f0';
-          ctx.fillRect(fx + 6, py, TILE_W - 12, 1);
-          if (plate.pinnedByDebris) {
-            // Visible fallen masonry slab weighting the hold-plate!
-            ctx.fillStyle = theme.floorFace;
-            ctx.fillRect(fx + 6, fyy - 5, TILE_W - 12, 5);
-            ctx.fillStyle = theme.floorTop;
-            ctx.fillRect(fx + 6, fyy - 5, TILE_W - 12, 2);
-            ctx.fillStyle = '#090c10';
-            ctx.fillRect(fx + 14, fyy - 5, 1, 4);
-          }
-        } else {
-          ctx.fillStyle = ch === 'Q' ? '#9c2c34' : theme.floorTrim;
-          ctx.fillRect(fx + 5, py, TILE_W - 10, down ? 1 : 2);
-          ctx.fillStyle = ch === 'Q' ? '#ff6470' : '#f2d98d';
-          ctx.fillRect(fx + 7, py, TILE_W - 14, 1);
+        const insetL = x + 5;
+        const insetW = TILE_W - 10;
+        const pYF = yF - 1;
+        const pYB = yB + 1.5;
+        const dxS = ISO_DX * 0.68;
+
+        // Recessed dark socket rim in the top face
+        fillQuad(ctx, insetL - 1, pYF + 0.5, insetL - 1 + dxS, pYB - 0.5, insetL + insetW + 1 + dxS, pYB - 0.5, insetL + insetW + 1, pYF + 0.5, 'rgba(0,0,0,0.52)');
+
+        // Raised / depressed 3D plate slab
+        const lift = down ? 0 : 2;
+        const topCol = plate && plate.hold ? '#7ce8f0' : (ch === 'Q' ? '#ff6470' : '#f2d98d');
+        const faceCol = plate && plate.hold ? '#226c75' : (ch === 'Q' ? '#9c2c34' : theme.floorTrim);
+        const sideCol = plate && plate.hold ? '#14444a' : (ch === 'Q' ? '#5c181e' : theme.floorDark);
+
+        // Right shadow side of raised plate
+        if (!down) {
+          fillQuad(
+            ctx,
+            insetL + insetW, pYF - lift,
+            insetL + insetW + dxS, pYB - lift,
+            insetL + insetW + dxS, pYB,
+            insetL + insetW, pYF,
+            sideCol
+          );
+        }
+        // Lit oblique top surface of plate
+        fillQuad(
+          ctx,
+          insetL, pYF - lift,
+          insetL + dxS, pYB - lift,
+          insetL + insetW + dxS, pYB - lift,
+          insetL + insetW, pYF - lift,
+          topCol
+        );
+        // Front face thickness
+        ctx.fillStyle = faceCol;
+        ctx.fillRect(insetL, pYF - lift, insetW, down ? 1 : 2);
+
+        if (plate && plate.pinnedByDebris) {
+          // 3D fallen masonry chunk weighting the hold-plate!
+          const mx = x + 7;
+          const mw = TILE_W - 14;
+          const myF = yF - 1;
+          const mh = 5;
+          const mdx = 3.5;
+          const mdy = -5;
+          fillQuad(ctx, mx + mw, myF - mh, mx + mw + mdx, myF - mh + mdy, mx + mw + mdx, myF + mdy, mx + mw, myF, theme.floorSide);
+          fillQuad(ctx, mx, myF - mh, mx + mdx, myF - mh + mdy, mx + mw + mdx, myF - mh + mdy, mx + mw, myF - mh, theme.floorTop);
+          ctx.fillStyle = theme.floorFace;
+          ctx.fillRect(mx, myF - mh, mw, mh);
+          ctx.fillStyle = theme.floorEdgeBevel;
+          ctx.fillRect(mx, myF - mh, mw, 1);
+          ctx.fillStyle = '#090c10';
+          ctx.fillRect(mx + 8, myF - mh, 1, 4);
         }
       }
 
-      // Spikes
+      // 3. Spikes ('^') — 2 staggered rows rising out of dark holes in the floor's top face
       if (ch === '^') {
         const sp = room.spikes.get(`${c},${r}`);
         const ext = sp ? sp.extended : 0.3;
         const h = Math.max(3, Math.round(ext * 13));
-        for (let i = 0; i < 4; i++) {
-          const sx = fx + 4 + i * 7;
+        const spikeDark = mixHex(theme.spikeCol, '#141a20', 0.55);
+
+        // Back row (2 spikes at z = 0.65) drawn first, then front row (3 spikes at z = 0.25)
+        const spikeSpecs = [
+          { sx: x + 10 + ISO_DX * 0.65, sy: yF + ISO_DY * 0.65, scale: 0.92 },
+          { sx: x + 22 + ISO_DX * 0.65, sy: yF + ISO_DY * 0.65, scale: 0.92 },
+          { sx: x + 5 + ISO_DX * 0.22,  sy: yF + ISO_DY * 0.22, scale: 1.0 },
+          { sx: x + 15 + ISO_DX * 0.22, sy: yF + ISO_DY * 0.22, scale: 1.0 },
+          { sx: x + 25 + ISO_DX * 0.22, sy: yF + ISO_DY * 0.22, scale: 1.0 },
+        ];
+        for (const s of spikeSpecs) {
+          const sh = Math.max(2, Math.round(h * s.scale));
+          // Dark socket hole in the floor top face
+          ctx.fillStyle = 'rgba(4, 6, 9, 0.85)';
+          ctx.beginPath();
+          ctx.ellipse(s.sx + 2.2, s.sy, 2.8, 1.1, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Two-tone 3D faceted spike: lit left facet + shaded right facet
           ctx.fillStyle = theme.spikeCol;
           ctx.beginPath();
-          ctx.moveTo(sx, fyy);
-          ctx.lineTo(sx + 2.5, fyy - h);
-          ctx.lineTo(sx + 5, fyy);
+          ctx.moveTo(s.sx, s.sy);
+          ctx.lineTo(s.sx + 2.2, s.sy - sh);
+          ctx.lineTo(s.sx + 2.2, s.sy);
           ctx.closePath();
           ctx.fill();
+
+          ctx.fillStyle = spikeDark;
+          ctx.beginPath();
+          ctx.moveTo(s.sx + 2.2, s.sy);
+          ctx.lineTo(s.sx + 2.2, s.sy - sh);
+          ctx.lineTo(s.sx + 4.4, s.sy);
+          ctx.closePath();
+          ctx.fill();
+
+          // Sharp metallic tip glint
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(sx + 2, fyy - h, 1, Math.min(3, h));
+          ctx.fillRect(Math.round(s.sx + 1.8), Math.round(s.sy - sh), 1, Math.min(3, sh));
         }
       }
 
-      // Exit Door
+      // 4. Exit Door ('E') — deeply recessed into the back wall with thick 3D stone/brass surround
       if (ch === 'E') {
         const ex = level.getExitAt(room.id, c, r);
         const openAmt = ex ? ex.openAmount : 0;
-        const dx = x + 3;
-        const dw = TILE_W - 6;
-        const dh = 36;
-        const dy = fy - dh;
-        // Frame
+        const dw = 20;
+        const dh = 32;
+        const dx = x + 6 + Math.round(ISO_DX * 0.35);
+        const dyBot = yB;
+        const dy = dyBot - dh;
+
+        // Thick 3D outer surround frame (5px protruding masonry/brass portal with lit top & right faces)
+        const fL = dx - 4;
+        const fT = dy - 4;
+        const fW = dw + 8;
+        const fH = dh + 4;
+        const fDx = 5;
+        const fDy = -4;
+        // Lit top lintel return
+        fillQuad(ctx, fL, fT, fL + fDx, fT + fDy, fL + fW + fDx, fT + fDy, fL + fW, fT, mixHex(theme.exitFrame, '#ffffff', 0.24));
+        // Lit right outer jamb return (consistent with top-right-front light)
+        const rg = ctx.createLinearGradient(fL + fW, fT, fL + fW + fDx, fT);
+        rg.addColorStop(0, mixHex(theme.exitFrame, '#ffffff', 0.14));
+        rg.addColorStop(1, mixHex(theme.exitFrame, '#080a0c', 0.38));
+        fillQuad(ctx, fL + fW, fT, fL + fW + fDx, fT + fDy, fL + fW + fDx, dyBot + fDy, fL + fW, dyBot, rg);
+        // Front surround casing
         ctx.fillStyle = theme.exitFrame;
-        ctx.fillRect(dx - 2, dy - 2, dw + 4, dh + 2);
-        // Interior (glows warm/bright when open)
+        ctx.fillRect(fL, fT, fW, fH);
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        ctx.fillRect(fL, fT, fW, 1);
+        ctx.fillRect(fL + fW - 1, fT, 1, fH);
+        ctx.fillStyle = 'rgba(0,0,0,0.30)';
+        ctx.fillRect(fL, fT, 1, fH);
+
+        // Deep recessed doorway cavity
         ctx.fillStyle = openAmt > 0.1 ? '#293e52' : theme.exitInner;
         ctx.fillRect(dx, dy, dw, dh);
-        if (openAmt > 0.2) {
-          const g = ctx.createLinearGradient(dx, dy, dx, fy);
-          g.addColorStop(0, 'rgba(255, 224, 130, 0.45)');
-          g.addColorStop(1, 'rgba(120, 210, 255, 0.25)');
+
+        // Deep shadowed inner jamb reveal (5px top soffit & 4px left jamb angled into the back wall!)
+        fillQuad(ctx, dx, dy, dx + dw, dy, dx + dw - 2, dy + 4, dx + 4, dy + 4, 'rgba(0,0,0,0.62)');
+        fillQuad(ctx, dx, dy, dx + 4, dy + 4, dx + 4, dyBot, dx, dyBot, 'rgba(0,0,0,0.52)');
+
+        // Warm interior glow when open + trapezoid light spill onto floor top face
+        if (openAmt > 0.15) {
+          const g = ctx.createLinearGradient(dx, dy, dx, dyBot);
+          g.addColorStop(0, `rgba(255, 224, 130, ${(0.52 * openAmt).toFixed(2)})`);
+          g.addColorStop(1, `rgba(120, 210, 255, ${(0.30 * openAmt).toFixed(2)})`);
           ctx.fillStyle = g;
-          ctx.fillRect(dx + 1, dy + 1, dw - 2, dh - 1);
+          ctx.fillRect(dx + 3, dy + 3, dw - 4, dh - 3);
+
+          const lg = ctx.createLinearGradient(0, yB, 0, yF);
+          lg.addColorStop(0, `rgba(255, 224, 140, ${(0.34 * openAmt).toFixed(2)})`);
+          lg.addColorStop(1, 'rgba(255, 224, 140, 0)');
+          fillQuad(ctx, dx - 6, yF, dx, yB, dx + dw, yB, dx + dw - 4, yF, lg);
         }
-        // Sliding door leaf
+
+        // Recessed threshold step shadow on floor top face
+        fillQuad(ctx, dx - 2, yB + 2, dx, yB, dx + dw, yB, dx + dw - 2, yB + 2, 'rgba(0,0,0,0.46)');
+
+        // Sliding armored door leaf inside recess
         const leafH = Math.round(dh * (1 - openAmt));
         if (leafH > 1) {
           ctx.fillStyle = theme.wallFill;
-          ctx.fillRect(dx, dy, dw, leafH);
+          ctx.fillRect(dx + 2, dy + 2, dw - 2, Math.max(1, leafH - 2));
           ctx.fillStyle = theme.exitFrame;
-          ctx.fillRect(dx + 2, dy + Math.max(0, leafH - 3), dw - 4, 2);
-          // Swiss cross emblem on closed exit door
-          if (leafH > 20) {
+          ctx.fillRect(dx + 3, dy + Math.max(2, leafH - 3), dw - 4, 2);
+          if (leafH > 18) {
+            const emX = Math.round(dx + dw / 2 + 1);
+            const emY = dy + 8;
             ctx.fillStyle = '#c42b33';
-            ctx.fillRect(dx + dw / 2 - 4, dy + 10, 8, 8);
+            ctx.fillRect(emX - 4, emY, 8, 8);
             ctx.fillStyle = '#f5f4ef';
-            ctx.fillRect(dx + dw / 2 - 1, dy + 11, 2, 6);
-            ctx.fillRect(dx + dw / 2 - 3, dy + 13, 6, 2);
+            ctx.fillRect(emX - 1, emY + 1, 2, 6);
+            ctx.fillRect(emX - 3, emY + 3, 6, 2);
           }
         }
       }
 
-      // Mirror / CERN Quantum Detector Portal
+      // 5. Back-half of Gate ('G') — oblique floor groove + thick recessed back jamb column
+      if (ch === 'G') {
+        const cx = tileCenterX(c);
+        drawIsoLine(ctx, cx - 1, yF, cx - 1 + ISO_DX, yB, 'rgba(4, 6, 9, 0.78)', 2.5);
+        // Thick recessed back gate pillar anchored at the back wall plane (z = 1)
+        const bx = cx + ISO_DX;
+        const bTop = Math.max(topY, topY + ISO_DY + 4);
+        ctx.fillStyle = theme.recessDark;
+        ctx.fillRect(bx - 3, bTop, 6, yB - bTop);
+        ctx.fillStyle = theme.wallSideMid;
+        ctx.fillRect(bx + 1, bTop, 2, yB - bTop);
+        ctx.fillStyle = theme.wallDark;
+        ctx.fillRect(bx - 3, bTop, 2, yB - bTop);
+      }
+
+      // 6. Back-half of Slicer ('C') — oblique floor emitter trench + thick back guide rail
+      if (ch === 'C') {
+        const cx = tileCenterX(c);
+        drawIsoLine(ctx, cx, yF, cx + ISO_DX, yB, '#0a1220', 3.5);
+        drawIsoLine(ctx, cx - 1, yF, cx - 1 + ISO_DX, yB, '#3a5578', 1);
+        const bx = cx + ISO_DX;
+        const bTop = Math.max(topY, topY + ISO_DY + 4);
+        ctx.fillStyle = '#182436';
+        ctx.fillRect(bx - 2, bTop, 5, yB - bTop);
+        ctx.fillStyle = '#48668f';
+        ctx.fillRect(bx + 1, bTop, 2, yB - bTop);
+      }
+
+      // 7. Back-half of Mirror / CERN Quantum Detector ('M')
       if (ch === 'M' && room.mirror && !room.mirror.broken) {
         const mx = tileCenterX(c);
-        const my = fy - 38;
-        ctx.fillStyle = '#2d4e78';
-        ctx.fillRect(mx - 4, my, 8, 38);
-        const shimmer = 0.55 + 0.35 * Math.sin(time * 5);
-        ctx.fillStyle = `rgba(110, 232, 255, ${shimmer.toFixed(2)})`;
-        ctx.fillRect(mx - 2, my + 2, 4, 34);
-        ctx.fillStyle = '#ffffff';
-        const scanY = my + 3 + Math.floor(((time * 32) % 30));
-        ctx.fillRect(mx - 2, scanY, 4, 2);
+        const mh = 36;
+        const bx = mx + ISO_DX;
+        ctx.fillStyle = '#1a3150';
+        ctx.fillRect(bx - 2, yB - mh, 4, mh);
+        drawIsoLine(ctx, mx, yF, mx + ISO_DX, yB, '#2d4e78', 4);
+      }
+    }
+  }
+}
+
+function drawForegroundSlabFronts(ctx, level, room, player, theme, time) {
+  const skipLedge = (player.state === 'hang' || player.state === 'climb_up' || player.state === 'climb_down')
+    ? player.hangLedge
+    : null;
+
+  for (let r = ROWS - 1; r >= 0; r--) {
+    const fy = floorY(r);
+    for (let c = 0; c < COLS; c++) {
+      const ch = room.grid[r][c];
+      if (ch === '.' || ch === '#') continue;
+      if (skipLedge && skipLedge.ledgeRoomId === room.id && skipLedge.col === c && skipLedge.row === r) {
+        continue;
+      }
+      const edgeFlags = getSlabEdgeFlags(level, room, c, r);
+      const leftCh = level.getTile(room.id, c - 1, r);
+      const leftHasFloor = leftCh !== '.' && leftCh !== '#';
+      const extraRightW = tileHasLeftReveal(level, room, c + 1, r) ? WALL_REVEAL_L : 0;
+      if (ch === 'L') {
+        const l = room.loose.get(`${c},${r}`);
+        if (l && l.state === 'fallen') continue;
+        let shakeX = 0;
+        let shakeY = 0;
+        if (l && l.state === 'shaking') {
+          shakeX = Math.sin(time * 55 + c) * 1.4;
+          shakeY = Math.cos(time * 47) * 0.9;
+        }
+        drawFloorSlabFront(ctx, Math.round(c * TILE_W + shakeX), Math.round(fy + shakeY), theme, {
+          isLoose: true,
+          leftHasFloor,
+          extraRightW,
+          ...edgeFlags,
+        });
+      } else {
+        drawFloorSlabFront(ctx, c * TILE_W, fy, theme, {
+          isLoose: false,
+          leftHasFloor,
+          extraRightW,
+          ...edgeFlags,
+        });
       }
     }
   }
 }
 
 function drawRoomForegroundTraps(ctx, level, room, theme, time) {
-  // Gates (heavy iron portcullis — clearly NOT a climbable ladder!)
+  // 1. Gates — 3D oblique portcullis bars set deep inside a thick 9px extruded stone/iron frame
   for (const g of room.gates) {
     const cx = tileCenterX(g.col);
     const fy = floorY(g.row);
     const topY = g.row * TILE_H;
-    const totalH = fy - topY;
+    const yF = fy + SLAB_FRONT_OFF;
+    const aboveOpen = level.getTile(room.id, g.col, g.row - 1) === '.';
+    const totalH = (yF - 4) - topY;
     const closedH = Math.max(5, Math.round(totalH * (1 - g.openAmount * 0.85)));
 
-    // Solid overhead lintel housing with iron rivets
-    ctx.fillStyle = theme.wallDark;
-    ctx.fillRect(cx - 9, topY, 18, 6);
-    ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(cx - 8, topY, 16, 1);
-    ctx.fillStyle = theme.gateHi;
-    ctx.fillRect(cx - 7, topY + 2, 1, 1);
-    ctx.fillRect(cx + 6, topY + 2, 1, 1);
-
-    // Side stone/steel gate frame jambs
-    ctx.fillStyle = 'rgba(10, 14, 18, 0.55)';
-    ctx.fillRect(cx - 7, topY + 6, 1, totalH - 6);
-    ctx.fillRect(cx + 6, topY + 6, 1, totalH - 6);
-
-    // 4 heavy vertical dark-iron portcullis bars
-    const barOffsets = [-5, -2, 1, 4];
-    for (const bo of barOffsets) {
-      ctx.fillStyle = '#1c2228';
-      ctx.fillRect(cx + bo, topY + 5, 2, Math.max(1, closedH - 5));
-      ctx.fillStyle = theme.gateBar;
-      ctx.fillRect(cx + bo, topY + 5, 1, Math.max(1, closedH - 5));
+    ctx.save();
+    if (!aboveOpen) {
+      ctx.beginPath();
+      ctx.rect(0, topY, VIEW_W, PLAY_H - topY);
+      ctx.clip();
     }
 
-    // Just 1 upper structural brace + heavy bottom lock bar with sharp downward teeth
+    // 4 heavy vertical dark-iron portcullis bars staggered across the full 9px oblique depth
+    const barFracs = [0.88, 0.62, 0.36, 0.12];
+    for (const z of barFracs) {
+      const bx = Math.round(cx - 1 + z * ISO_DX);
+      const bTop = Math.round(topY + 4 + z * ISO_DY);
+      const bLen = Math.max(2, closedH - 4);
+      ctx.fillStyle = '#14191f';
+      ctx.fillRect(bx, bTop, 2, bLen);
+      ctx.fillStyle = z < 0.5 ? theme.gateHi : theme.gateBar;
+      ctx.fillRect(bx + 1, bTop, 1, bLen);
+    }
+
+    // Slanted oblique structural cross-brace (when lowered enough)
     if (closedH > 18) {
-      ctx.fillStyle = '#252d36';
-      ctx.fillRect(cx - 6, topY + Math.floor(closedH * 0.45), 12, 2);
-      ctx.fillStyle = theme.gateHi;
-      ctx.fillRect(cx - 6, topY + Math.floor(closedH * 0.45), 12, 1);
+      const midY = topY + Math.floor(closedH * 0.48);
+      drawIsoLine(ctx, cx - 2, midY + 1, cx + ISO_DX + 1, midY + 1 + ISO_DY, '#182028', 2.4);
+      drawIsoLine(ctx, cx - 2, midY, cx + ISO_DX + 1, midY + ISO_DY, theme.gateHi, 1);
     }
-    const botY = topY + closedH - 2;
-    ctx.fillStyle = '#252d36';
-    ctx.fillRect(cx - 6, botY, 12, 2);
+
+    // Heavy slanted bottom lock bar + sharp downward portcullis teeth seated in floor groove
+    const botY = topY + closedH - 1;
+    drawIsoLine(ctx, cx - 2, botY + 1, cx + ISO_DX + 1, botY + 1 + ISO_DY, '#182028', 2.6);
+    drawIsoLine(ctx, cx - 2, botY, cx + ISO_DX + 1, botY + ISO_DY, theme.gateHi, 1);
+    ctx.fillStyle = '#d4dde6';
+    for (const z of barFracs) {
+      const bx = Math.round(cx - 1 + z * ISO_DX);
+      const ty = Math.round(botY + 1 + z * ISO_DY);
+      ctx.fillRect(bx + 1, ty, 1, 3);
+    }
+
+    // Thick 3D overhead lintel housing (extruded 9px right-side + front riveted face)
+    const lx = cx - 6;
+    const lw = 11;
+    const lh = 6;
+    if (aboveOpen) {
+      fillQuad(ctx, lx, topY, lx + ISO_DX, topY + ISO_DY, lx + lw + ISO_DX, topY + ISO_DY, lx + lw, topY, theme.wallTop);
+    }
+    const lg = ctx.createLinearGradient(lx + lw, topY, lx + lw + ISO_DX, topY);
+    lg.addColorStop(0, theme.wallSideLit);
+    lg.addColorStop(1, theme.wallSideBack);
+    fillQuad(ctx, lx + lw, topY, lx + lw + ISO_DX, topY + ISO_DY, lx + lw + ISO_DX, topY + lh + ISO_DY, lx + lw, topY + lh, lg);
+    ctx.fillStyle = theme.wallFill;
+    ctx.fillRect(lx, topY, lw, lh);
+    ctx.fillStyle = theme.wallArrisHi;
+    ctx.fillRect(lx + lw - 1, topY, 1, lh);
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(lx, topY + lh - 1, lw, 1);
     ctx.fillStyle = theme.gateHi;
-    ctx.fillRect(cx - 6, botY, 12, 1);
-    // Sharp downward portcullis spikes along bottom bar
-    ctx.fillStyle = '#cdd6e0';
-    for (const bo of barOffsets) {
-      ctx.fillRect(cx + bo, botY + 2, 1, 3);
-    }
+    ctx.fillRect(lx + 2, topY + 2, 1, 1);
+    ctx.fillRect(lx + lw - 3, topY + 2, 1, 1);
+
+    // Thick 3px front gate jamb pillar at z = 0 (with lit right edge so frame feels truly thick)
+    ctx.fillStyle = theme.wallDark;
+    ctx.fillRect(cx - 5, topY + lh, 3, yF - (topY + lh));
+    ctx.fillStyle = theme.wallFill;
+    ctx.fillRect(cx - 4, topY + lh, 1, yF - (topY + lh));
+    ctx.fillStyle = theme.wallHi;
+    ctx.fillRect(cx - 3, topY + lh, 1, yF - (topY + lh));
+
+    ctx.restore();
   }
 
-  // Slicer traps (CERN beam shutters / guillotine jaws with permanent emitter rails)
+  // 2. Slicers / CERN Beam Shutters — 9px oblique depth jaws, glowing blade plane & thick emitter housing
   for (const s of room.slicers.values()) {
     const cx = tileCenterX(s.col);
     const fy = floorY(s.row);
     const topY = s.row * TILE_H;
-    const spanH = fy - topY;
+    const yF = fy + SLAB_FRONT_OFF;
+    const yB = yF + ISO_DY;
+    const spanH = yF - topY;
+    const aboveOpen = level.getTile(room.id, s.col, s.row - 1) === '.';
     const st = level.getSlicerState(room.id, s.col, s.row, time);
 
-    // Permanent vertical side guide rails so open beam shutters remain unmistakable!
-    ctx.fillStyle = '#26344a';
-    ctx.fillRect(cx - 6, topY + 4, 2, spanH - 6);
-    ctx.fillRect(cx + 4, topY + 4, 2, spanH - 6);
-    ctx.fillStyle = '#4e6c96';
-    ctx.fillRect(cx - 5, topY + 5, 1, spanH - 8);
-    ctx.fillRect(cx + 4, topY + 5, 1, spanH - 8);
-    // Subtle intermittent guide ticks along rail
-    ctx.fillStyle = st.closed ? '#ff4466' : st.warning ? '#ffd044' : '#3eb8e0';
-    ctx.fillRect(cx - 6, topY + Math.floor(spanH * 0.5), 1, 2);
-    ctx.fillRect(cx + 5, topY + Math.floor(spanH * 0.5), 1, 2);
-
-    // Heavy emitter housings top & bottom
-    ctx.fillStyle = '#182233';
-    ctx.fillRect(cx - 7, topY, 14, 6);
-    ctx.fillRect(cx - 7, fy - 4, 14, 4);
-    ctx.fillStyle = '#527099';
-    ctx.fillRect(cx - 7, topY + 5, 14, 1);
-    ctx.fillRect(cx - 7, fy - 4, 14, 1);
-    // Status LED
-    ctx.fillStyle = st.closed ? '#ff3355' : st.warning ? '#ffcc33' : '#40d8ff';
-    ctx.fillRect(cx - 3, topY + 2, 6, 2);
-    ctx.fillRect(cx - 2, fy - 2, 4, 1);
+    ctx.save();
+    if (!aboveOpen) {
+      ctx.beginPath();
+      ctx.rect(0, topY, VIEW_W, PLAY_H - topY);
+      ctx.clip();
+    }
 
     if (st.closed) {
-      // Snapped shut lethal high-energy beam shutter
-      ctx.fillStyle = 'rgba(255, 66, 110, 0.35)';
-      ctx.fillRect(cx - 5, topY + 6, 10, spanH - 10);
-      ctx.fillStyle = theme.slicerCol;
-      ctx.fillRect(cx - 3, topY + 6, 6, spanH - 10);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(cx - 1, topY + 6, 2, spanH - 10);
+      fillQuad(
+        ctx,
+        cx - 2, topY + 5,
+        cx + ISO_DX + 2, topY + 5 + ISO_DY,
+        cx + ISO_DX + 2, yB - 2,
+        cx - 2, yF - 3,
+        'rgba(255, 66, 110, 0.36)'
+      );
+      fillQuad(
+        ctx,
+        cx - 1, topY + 5,
+        cx + ISO_DX, topY + 5 + ISO_DY,
+        cx + ISO_DX, yB - 2,
+        cx - 1, yF - 3,
+        theme.slicerCol
+      );
+      drawIsoLine(ctx, cx, topY + 5, cx, yF - 3, '#ffffff', 1.6);
+      drawIsoLine(ctx, cx + ISO_DX * 0.5, topY + 5 + ISO_DY * 0.5, cx + ISO_DX * 0.5, yF - 3 + ISO_DY * 0.5, 'rgba(255,255,255,0.75)', 1);
     } else if (st.warning) {
-      // Closing jaws + pulsing laser target beam
       const jaw = Math.round((1 - st.openness) * 16);
-      ctx.fillStyle = theme.slicerCol;
-      ctx.fillRect(cx - 3, topY + 6, 6, jaw);
-      ctx.fillRect(cx - 3, fy - 4 - jaw, 6, jaw);
-      ctx.fillStyle = 'rgba(255, 90, 120, 0.55)';
-      ctx.fillRect(cx - 1, topY + 6, 2, spanH - 10);
+      fillQuad(ctx, cx - 2, topY + 5, cx + ISO_DX, topY + 5 + ISO_DY, cx + ISO_DX, topY + 5 + jaw + ISO_DY, cx - 2, topY + 5 + jaw, theme.slicerCol);
+      fillQuad(ctx, cx - 2, yF - 3 - jaw, cx + ISO_DX, yB - 2 - jaw, cx + ISO_DX, yB - 2, cx - 2, yF - 3, theme.slicerCol);
+      drawIsoLine(ctx, cx + 1, topY + 5, cx + 1, yF - 3, 'rgba(255, 90, 120, 0.65)', 1.5);
     } else {
-      // Faint dotted alignment laser when safe/open so hazard column is always clear
-      ctx.fillStyle = 'rgba(80, 210, 255, 0.24)';
-      for (let y = topY + 8; y < fy - 6; y += 5) {
+      ctx.fillStyle = 'rgba(80, 210, 255, 0.28)';
+      for (let y = topY + 8; y < yF - 5; y += 5) {
         ctx.fillRect(cx, y, 1, 2);
+        ctx.fillRect(cx + 4, y - 4, 1, 2);
       }
     }
+
+    // Thick 9px-deep emitter housings (top & bottom) with lit right side face
+    const hx = cx - 4;
+    const hw = 8;
+    if (aboveOpen) {
+      fillQuad(ctx, hx, topY, hx + ISO_DX, topY + ISO_DY, hx + hw + ISO_DX, topY + ISO_DY, hx + hw, topY, '#496894');
+    }
+    fillQuad(ctx, hx + hw, topY, hx + hw + ISO_DX, topY + ISO_DY, hx + hw + ISO_DX, topY + 5 + ISO_DY, hx + hw, topY + 5, '#344c6e');
+    ctx.fillStyle = '#182233';
+    ctx.fillRect(hx, topY, hw, 5);
+    ctx.fillStyle = '#688ab8';
+    ctx.fillRect(hx + hw - 1, topY, 1, 5);
+    ctx.fillStyle = '#527099';
+    ctx.fillRect(hx, topY + 4, hw, 1);
+
+    fillQuad(ctx, hx, yF - 3, hx + ISO_DX, yB - 3, hx + hw + ISO_DX, yB - 3, hx + hw, yF - 3, '#496894');
+    fillQuad(ctx, hx + hw, yF - 3, hx + hw + ISO_DX, yB - 3, hx + hw + ISO_DX, yB, hx + hw, yF, '#344c6e');
+    ctx.fillStyle = '#182233';
+    ctx.fillRect(hx, yF - 3, hw, 3);
+    ctx.fillStyle = '#688ab8';
+    ctx.fillRect(hx + hw - 1, yF - 3, 1, 3);
+
+    // Permanent front vertical guide rail
+    ctx.fillStyle = '#26344a';
+    ctx.fillRect(cx - 3, topY + 5, 2, spanH - 8);
+    ctx.fillStyle = '#688ab8';
+    ctx.fillRect(cx - 2, topY + 5, 1, spanH - 8);
+
+    // Status LEDs (top, rail center, bottom)
+    const ledCol = st.closed ? '#ff3355' : st.warning ? '#ffcc33' : '#40d8ff';
+    ctx.fillStyle = ledCol;
+    ctx.fillRect(cx - 2, topY + 1, 4, 2);
+    ctx.fillRect(cx - 3, topY + Math.floor(spanH * 0.5), 1, 2);
+    ctx.fillRect(cx - 2, yF - 2, 4, 1);
+
+    ctx.restore();
+  }
+
+  // 3. Mirror / CERN Quantum Detector Portal front plane
+  if (room.mirror && !room.mirror.broken) {
+    const mx = tileCenterX(room.mirror.col);
+    const fy = floorY(room.mirror.row);
+    const yF = fy + SLAB_FRONT_OFF;
+    const yB = yF + ISO_DY;
+    const mh = 36;
+    const shimmer = 0.48 + 0.30 * Math.sin(time * 5);
+
+    // Translucent oblique quantum plane spanning front to back
+    fillQuad(
+      ctx,
+      mx, yF - mh,
+      mx + ISO_DX, yB - mh,
+      mx + ISO_DX, yB,
+      mx, yF,
+      `rgba(110, 232, 255, ${shimmer.toFixed(2)})`
+    );
+    // Animated oblique scanline sweeping vertically through the portal
+    const scanOff = Math.floor((time * 30) % (mh - 4));
+    drawIsoLine(ctx, mx, yF - mh + 2 + scanOff, mx + ISO_DX, yB - mh + 2 + scanOff, '#ffffff', 1.5);
+    // Top cap + front detector post
+    drawIsoLine(ctx, mx, yF - mh, mx + ISO_DX, yB - mh, '#5ca8e0', 2);
+    ctx.fillStyle = '#2d4e78';
+    ctx.fillRect(mx - 2, yF - mh, 3, mh);
+    ctx.fillStyle = '#8ad4f5';
+    ctx.fillRect(mx - 2, yF - mh, 1, mh);
   }
 }
 
@@ -1460,54 +2670,84 @@ function drawWindOverlay(ctx, level, room, time) {
 function drawItems(ctx, room, time) {
   for (const it of room.items) {
     if (it.collected) continue;
-    const x = Math.round(it.x);
-    const y = Math.round(it.y);
-    const bob = Math.sin(time * 4 + it.col) * 1;
+    // Rest item squarely on the floor's top face (slightly back from front edge)
+    const x = Math.round(it.x + 1.5);
+    const y = Math.round(it.y - 1);
+    const bob = Math.sin(time * 4 + it.col) * 0.7;
 
     if (it.type === 'sword') {
-      // Guild Sabre resting on stone pedestal / floor with golden glint
+      // Skewed contact shadow on top face
+      ctx.save();
+      ctx.transform(1, 0, ISO_DX / ISO_DY, 1, x + 0.5, y + 0.4);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 11.5, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Low 3D stone plinth resting on the top face
+      fillQuad(ctx, x - 9, y - 1, x - 7, y - 4, x + 11, y - 4, x + 9, y - 1, '#5b4e38');
+      fillQuad(ctx, x + 9, y - 1, x + 11, y - 4, x + 11, y - 2, x + 9, y + 1, '#241e15');
       ctx.fillStyle = '#3a3022';
-      ctx.fillRect(x - 10, y - 2, 20, 2);
+      ctx.fillRect(x - 9, y - 1, 18, 2);
+
+      // Guild Sabre lying across the plinth with golden hilt & glint
       ctx.strokeStyle = '#eef5ff';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(x - 9, y - 3 + bob * 0.4);
+      ctx.moveTo(x - 8, y - 3 + bob * 0.4);
       ctx.lineTo(x + 10, y - 6 + bob * 0.4);
       ctx.stroke();
       ctx.fillStyle = '#e0b341';
-      ctx.fillRect(x - 11, y - 5 + bob * 0.4, 3, 4);
+      ctx.fillRect(x - 10, y - 5 + bob * 0.4, 3, 4);
+      ctx.fillStyle = '#fff0a8';
+      ctx.fillRect(x - 10, y - 5 + bob * 0.4, 1, 2);
       if (Math.sin(time * 5) > 0.6) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(x + 3, y - 7, 2, 2);
       }
     } else {
-      // Elixir flask: small (crimson), large (tall gold-rimmed crimson), poison (bluish)
+      // Elixir flask sitting on the top face: small (crimson), large (gold-rimmed), poison (bluish)
       const isLarge = it.type === 'large_elixir';
       const isPoison = it.type === 'poison';
       const fill = isPoison ? '#3a86e8' : '#e02f3f';
+      const dark = isPoison ? '#1e4a8a' : '#8a1824';
       const hi = isPoison ? '#99d4ff' : '#ff9ca6';
       const h = isLarge ? 9 : 6;
       const w = isLarge ? 7 : 5;
 
-      // Subtle glow
+      // Skewed floor contact shadow + subtle colored light pool on top face
+      ctx.save();
+      ctx.transform(1, 0, ISO_DX / ISO_DY, 1, x + 0.5, y + 0.5);
       ctx.fillStyle = isPoison ? 'rgba(60,140,255,0.22)' : 'rgba(255,70,90,0.22)';
       ctx.beginPath();
-      ctx.arc(x, y - h / 2, isLarge ? 7 : 5, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, isLarge ? 7.5 : 5.5, 2.2, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.38)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, isLarge ? 4.2 : 3.2, 1.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
 
-      // Flask body
+      // 3D shaded cylindrical flask body
+      const fx = x - Math.floor(w / 2);
       ctx.fillStyle = fill;
-      ctx.fillRect(x - Math.floor(w / 2), y - h, w, h);
-      // Neck
+      ctx.fillRect(fx, y - h, w, h);
+      // Shaded right side for cylindrical volume
+      ctx.fillStyle = dark;
+      ctx.fillRect(fx + w - 2, y - h, 2, h);
+      // Rounded shoulder + neck
       ctx.fillStyle = '#d4dde6';
       ctx.fillRect(x - 1, y - h - 2, 2, 2);
-      // Specular highlight
+      ctx.fillStyle = '#9aa8b8';
+      ctx.fillRect(x, y - h - 2, 1, 2);
+      // Specular highlight on lit left edge
       ctx.fillStyle = hi;
-      ctx.fillRect(x - Math.floor(w / 2) + 1, y - h + 1, 1, Math.max(2, h - 3));
+      ctx.fillRect(fx + 1, y - h + 1, 1, Math.max(2, h - 3));
       // Large elixir gold ring
       if (isLarge) {
         ctx.fillStyle = '#f2c94c';
-        ctx.fillRect(x - 3, y - h, 6, 1);
+        ctx.fillRect(fx, y - h, w, 1);
       }
     }
   }
