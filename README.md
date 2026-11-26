@@ -38,6 +38,7 @@ With sixty real minutes on the SBB railway clock, cross Switzerland from Zurich 
 | `R` | Restart current level (global clock keeps running) |
 | `Esc` | Pause / Resume / Back from Level Select |
 | `M` | Toggle mute |
+| `F` | Toggle fullscreen (also the on-screen button) |
 
 On touch devices, an on-screen control overlay appears automatically.
 
