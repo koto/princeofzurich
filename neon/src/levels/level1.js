@@ -1,12 +1,12 @@
 // src/levels/level1.js
 // Level 1: Paradeplatz Vaults, Zurich (9 rooms)
 // Teaches: movement, jumps, ledge climbing, climb-down, loose floors, plates/gates,
-// guild sabre pickup, optional vault verticality, and first fencing duels.
+// Guild Sabre (Asset 0041) pickup, optional vault verticality, and first fencing duels.
 
 export const level1 = {
   id: 0,
-  name: 'Paradeplatz Vaults, Zurich',
-  subtitle: '23:00 — Sub-Basement 4',
+  name: 'Paradeplatz Vaults',
+  subtitle: 'ZURICH (408M) - 23:00',
   ice: false,
   start: { room: 0, col: 1, row: 2, facing: 1, hasSword: false },
   rooms: {
@@ -14,7 +14,7 @@ export const level1 = {
     0: {
       seed: 101,
       links: { left: null, right: 1, up: null, down: null },
-      hint: 'ARROWS: Run/Jump. Press UP near a bright ledge lip to climb.',
+      hint: 'ARROWS: RUN/JUMP. PRESS UP AT A BRIGHT LEDGE TO CLIMB.',
       grid: [
         '############',
         '#......_____',
@@ -31,7 +31,7 @@ export const level1 = {
     1: {
       seed: 102,
       links: { left: 0, right: 3, up: null, down: 2 },
-      hint: 'Cracked tiles collapse. Descend the vault shaft to arm yourself and raise the grate.',
+      hint: 'CRACKED MARBLE COLLAPSES. DROP DOWN TO CLAIM A BLADE.',
       grid: [
         '############',
         '___L______G_',
@@ -50,11 +50,11 @@ export const level1 = {
       ],
     },
 
-    // Room 2: Guild Sabre Vault (Mandatory Sabre + vault gate plate + lower bonus recess)
+    // Room 2: Guild Sabre Vault (Mandatory Asset 0041 + vault gate plate + lower bonus recess)
     2: {
       seed: 103,
       links: { left: null, right: 4, up: 1, down: null },
-      hint: 'Press SHIFT beside the Guild Sabre, then step on the brass plate to raise the upper grate.',
+      hint: 'SHIFT TAKES ASSET 0041. BRASS PLATES RAISE GRATES.',
       grid: [
         '####____.__#',
         '#P___.______',
@@ -74,11 +74,11 @@ export const level1 = {
       ],
     },
 
-    // Room 4: Bullion Undercroft (Optional 3-floor bonus vault with Large Elixir)
+    // Room 4: Bullion Undercroft (Optional 3-floor bonus vault with Reserve Tonic)
     4: {
       seed: 104,
       links: { left: 2, right: null, up: null, down: null },
-      hint: 'Bullion Reserve: climb or jump for the gold-rimmed Reserve Elixir (+1 Max HP).',
+      hint: 'BULLION RESERVE: CLIMB FOR THE RESERVE TONIC (+1 MAX HP).',
       grid: [
         '############',
         '___L__.____#',
@@ -97,7 +97,7 @@ export const level1 = {
     3: {
       seed: 105,
       links: { left: 1, right: 5, up: null, down: null },
-      hint: 'Press DOWN at a ledge edge to hang and climb down safely.',
+      hint: 'DOWN AT AN EDGE CLIMBS DOWN LIKE A RESPONSIBLE ADULT.',
       grid: [
         '############',
         '____._______',
@@ -117,7 +117,7 @@ export const level1 = {
     5: {
       seed: 106,
       links: { left: 3, right: 6, up: null, down: null },
-      hint: 'Step on the upper plate to raise the vault grate, then sprint through before it closes.',
+      hint: 'BRASS PLATES RAISE GRATES ON A TIMER. SPRINT THROUGH.',
       grid: [
         '############',
         '___.___P._##',
@@ -136,11 +136,11 @@ export const level1 = {
       ],
     },
 
-    // Room 6: First Vault Guard
+    // Room 6: First Vault Guard (Herr Kuster)
     6: {
       seed: 107,
       links: { left: 5, right: 7, up: null, down: null },
-      hint: 'Fencing: UP parries, SHIFT strikes/ripostes, LEFT/RIGHT steps, DOWN sheathes.',
+      hint: 'FENCING: UP PARRIES, SHIFT STRIKES, DOWN SHEATHES.',
       grid: [
         '############',
         '#___.._____#',
@@ -151,18 +151,22 @@ export const level1 = {
         { col: 2, row: 1, type: 'small_elixir' },
       ],
       enemies: [
-        { col: 8, row: 2, type: 'guard', facing: -1, hp: 2, skill: 1, name: 'Vault Guard' },
+        {
+          col: 8, row: 2, type: 'guard', facing: -1, hp: 2, skill: 1,
+          archetype: 'rookie', name: 'Herr Kuster',
+          bark: '"IT IS 23:03. DO YOU HAVE A NOISE PERMIT?"',
+        },
       ],
       decor: [
         { col: 6, row: 2, type: 'torch' },
       ],
     },
 
-    // Room 7: Treasury Hall (Second Guard + Upper Exit Plate)
+    // Room 7: Treasury Hall (Vault Captain Meister Baer + Upper Exit Plate)
     7: {
       seed: 108,
       links: { left: 6, right: 8, up: null, down: null },
-      hint: 'Defeat the Captain and climb up to trigger the Exit Plate.',
+      hint: 'PARRY MEISTER BAER (UP), THEN RIPOSTE (SHIFT).',
       grid: [
         '############',
         '#____P_.___#',
@@ -173,7 +177,11 @@ export const level1 = {
         { col: 5, row: 1, targetId: 'l1_exit', action: 'open' },
       ],
       enemies: [
-        { col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 1, name: 'Vault Captain' },
+        {
+          col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2,
+          archetype: 'sentry', name: 'Meister Baer',
+          bark: '"THAT IS ASSET 0041! SIGN IT OUT OR DROP IT!"',
+        },
       ],
       decor: [
         { col: 3, row: 2, type: 'banner' },
@@ -181,11 +189,11 @@ export const level1 = {
       ],
     },
 
-    // Room 8: Paradeplatz Exit Chute
+    // Room 8: 1941 Bullion Evacuation Chute Exit
     8: {
       seed: 109,
       links: { left: 7, right: null, up: null, down: null },
-      hint: 'Stand before the open vault door and press UP to escape.',
+      hint: 'PRESS UP AT THE OPEN 1941 GOLD CHUTE TO ESCAPE.',
       grid: [
         '############',
         '#______.___#',

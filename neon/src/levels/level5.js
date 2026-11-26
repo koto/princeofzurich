@@ -1,162 +1,200 @@
 // src/levels/level5.js
-// Level 5: Sphinx Observatory Summit (8 rooms)
-// Full 4-floor alpine summit ascent, pit-edge elite duel, open-sky boss duel with
-// Dr. Viktor Zins on the narrow 3,571m summit walkway, and rescue of Celine Amrein!
+// Level 5: Chateau de Chillon Viaduct Vaults (Montreux, Vaud, 372m - 23:25 CET) (9 rooms)
+// One New Gameplay Idea: Timed Hydraulic Sluice-Shutters (C, 2.7s gentle cadence) &
+// Hold-Plates (hold: true) requiring fallen masonry or a defeated guard to stay pinned!
+// Set-Piece: The Pillar of Bonivard (Room 6) — duel D. Favre + pin floodgate + hydraulic sprint.
 
 export const level5 = {
   id: 4,
-  name: 'Sphinx Observatory Summit',
-  subtitle: '23:51 — 3,571m High-Altitude Dome',
+  name: 'Chillon Viaduct',
+  subtitle: 'MONTREUX, VAUD (372M) - 23:25',
   ice: false,
+  slicerPeriod: 2.7,
   start: { room: 0, col: 1, row: 2, facing: 1, hasSword: true },
   rooms: {
-    // Room 0: Elevator Landing (Uses all 4 rows 0..3 under open starry summit sky!)
+    // Room 0: Viaduct Entry Vault (Teaches gentler 2.7s hydraulic shutter + upper Savoyard gallery)
     0: {
-      seed: 501,
+      seed: 1501,
       links: { left: null, right: 1, up: null, down: null },
-      hint: 'The summit dome lies ahead. Ascend the observatory tiers — midnight is close.',
+      hint: 'HYDRAULIC SHUTTERS CYCLE ON A BEAT. SPRINT ON OPEN.',
       grid: [
-        '#........___',
-        '#_____._____',
-        '#___L___C___',
-        '##____######',
+        '############',
+        '#______.___#',
+        '#____C______',
+        '############',
+      ],
+      items: [
+        { col: 2, row: 1, type: 'small_elixir' },
+      ],
+      decor: [
+        { col: 2, row: 2, type: 'sign' },
+        { col: 9, row: 1, type: 'torch' },
+      ],
+    },
+
+    // Room 1: Lake-Surge Sluice (Teaches hold-plate: drop overhead L stone to pin floodgate open!)
+    1: {
+      seed: 1502,
+      links: { left: 0, right: 2, up: null, down: null },
+      hint: 'HOLD-PLATES CLOSE WHEN EMPTY. DROP STONE OR GUARD.',
+      grid: [
+        '############',
+        '#___.L_____#',
+        '_____P____G_',
+        '############',
+      ],
+      plates: [
+        { col: 5, row: 2, targetId: 'l5_g_sluice', action: 'open', hold: true },
+      ],
+      gates: [
+        { id: 'l5_g_sluice', col: 10, row: 2, stayOpen: false },
+      ],
+      decor: [
+        { col: 3, row: 2, type: 'torch' },
+        { col: 8, row: 1, type: 'torch' },
+      ],
+    },
+
+    // Room 2: A9 Pier Cistern (Hydraulic shutters + survivable lake-cellar drop Room 4)
+    2: {
+      seed: 1503,
+      links: { left: 1, right: 3, up: null, down: 4 },
+      grid: [
+        '############',
+        '#_____.____#',
+        '___C_..__C__',
+        '####__.#####',
+      ],
+      decor: [
+        { col: 8, row: 1, type: 'torch' },
+      ],
+    },
+
+    // Room 4: Sub-Lake Bedrock Cellar (Below Room 2 — survivable 2-floor drop + tonic + climb back)
+    4: {
+      seed: 1504,
+      links: { left: null, right: null, up: 2, down: null },
+      hint: 'BEDROCK CELLAR: DRY YOUR BOOTS AND CLIMB BACK TO THE PIER.',
+      grid: [
+        '#####___.__#',
+        '#______.____',
+        '#__________#',
+        '############',
       ],
       items: [
         { col: 2, row: 2, type: 'small_elixir' },
       ],
       decor: [
-        { col: 6, row: 2, type: 'banner' },
-        { col: 10, row: 0, type: 'torch' },
+        { col: 8, row: 2, type: 'torch' },
       ],
     },
 
-    // Room 1: Summit Gauntlet (3-tier alpine ridge: open-sky top, shutter mid, spike+shutter low)
-    1: {
-      seed: 502,
-      links: { left: 0, right: 2, up: null, down: null },
+    // Room 3: Romandie Fiber Gallery (Duel Fiber Guard — drop overhead L OR defeat guard onto hold-plate P!)
+    3: {
+      seed: 1505,
+      links: { left: 2, right: 5, up: null, down: null },
       grid: [
-        '___.._______',
-        '______C_.__#',
-        '__^___C_____',
         '############',
+        '#____.L____#',
+        '______P___G_',
+        '############',
+      ],
+      plates: [
+        { col: 6, row: 2, targetId: 'l5_g_fiber', action: 'open', hold: true },
+      ],
+      gates: [
+        { id: 'l5_g_fiber', col: 10, row: 2, stayOpen: false },
+      ],
+      enemies: [
+        {
+          col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 3,
+          archetype: 'sentry', name: 'Fiber Guard',
+          bark: '"DAMP BOOTS ON SAVOYARD STONE? UNFORGIVABLE."',
+        },
       ],
       decor: [
-        { col: 9, row: 0, type: 'torch' },
+        { col: 3, row: 2, type: 'banner' },
       ],
     },
 
-    // Room 2: Security Checkpoint (3-tier elite arena with summit Large Elixir on row 0)
-    2: {
-      seed: 503,
-      links: { left: 1, right: 3, up: null, down: null },
+    // Room 5: Motorway Archway (All 4 rows 0..3 verticality + optional upper Reserve Tonic!)
+    5: {
+      seed: 1506,
+      links: { left: 3, right: 6, up: null, down: null },
       grid: [
-        '______..___#',
-        '#___.._____#',
-        '____________',
-        '############',
+        '#______.___#',
+        '#___C__.____',
+        '___L____C___',
+        '##____######',
       ],
       items: [
         { col: 9, row: 0, type: 'large_elixir' },
       ],
-      enemies: [
-        { col: 8, row: 2, type: 'elite', facing: -1, hp: 4, skill: 4, name: 'Zins Bodyguard' },
-      ],
       decor: [
         { col: 2, row: 0, type: 'torch' },
+        { col: 6, row: 2, type: 'sign' },
       ],
     },
 
-    // Room 3: Timed Observatory Gate (3-floor vaulted dome mechanism + reopen plate)
-    3: {
-      seed: 504,
-      links: { left: 2, right: 4, up: null, down: null },
+    // Room 6: SET-PIECE — The Pillar of Bonivard (Duel D. Favre + drop stone onto hold-plate + shutter!)
+    6: {
+      seed: 1507,
+      links: { left: 5, right: 7, up: null, down: null },
       grid: [
-        '##........##',
-        '#__P___.___#',
-        '____..____GP',
-        '###____#####',
+        '#_____.____#',
+        '#___.L_____#',
+        '_____P_C__G_',
+        '############',
       ],
       plates: [
-        { col: 3, row: 1, targetId: 'l5_g_dome', action: 'open' },
-        { col: 11, row: 2, targetId: 'l5_g_dome', action: 'open' },
+        { col: 5, row: 2, targetId: 'l5_g_bonivard', action: 'open', hold: true },
       ],
       gates: [
-        { id: 'l5_g_dome', col: 10, row: 2, openDuration: 10, stayOpen: false },
+        { id: 'l5_g_bonivard', col: 10, row: 2, stayOpen: false },
+      ],
+      enemies: [
+        {
+          col: 4, row: 2, type: 'elite', facing: -1, hp: 4, skill: 3,
+          archetype: 'duellist', name: 'D. Favre',
+          bark: '"LORD BYRON HAD BETTER MANNERS THAN YOU, COURIER."',
+        },
+      ],
+      items: [
+        { col: 2, row: 0, type: 'small_elixir' },
       ],
       decor: [
+        { col: 3, row: 2, type: 'banner' },
         { col: 9, row: 1, type: 'torch' },
       ],
     },
 
-    // Room 4: High-Altitude Catwalk (Open sky + pit/loose-catwalk elite duel!)
-    4: {
-      seed: 505,
-      links: { left: 3, right: 5, up: null, down: null },
+    // Room 7: Geneva Fiber Trunk (Double hydraulic cadence + upper Exit Plate on row 0)
+    7: {
+      seed: 1508,
+      links: { left: 6, right: 8, up: null, down: null },
       grid: [
-        '#...........',
-        '#_____._____',
-        '________L.__',
-        '#######____#',
-      ],
-      enemies: [
-        { col: 6, row: 2, type: 'elite', facing: -1, hp: 4, skill: 4, name: 'Chief of Security' },
-      ],
-      decor: [
-        { col: 2, row: 1, type: 'torch' },
-      ],
-    },
-
-    // Room 5: Antechamber before Zins (Open sky + upper walkway + final heal)
-    5: {
-      seed: 506,
-      links: { left: 4, right: 6, up: null, down: null },
-      hint: 'Dr. Viktor Zins waits on the summit walkway. Parry (UP) then riposte (SHIFT)!',
-      grid: [
-        '...........#',
-        '_______.___#',
-        '____C_______',
+        '#___P_.____#',
+        '#______.____',
+        '___C____C___',
         '############',
       ],
-      items: [
-        { col: 9, row: 2, type: 'small_elixir' },
-      ],
-      decor: [
-        { col: 7, row: 2, type: 'banner' },
-        { col: 10, row: 2, type: 'torch' },
-      ],
-    },
-
-    // Room 6: Narrow Summit Walkway — OPEN-SKY FINAL DUEL WITH DR. VIKTOR ZINS!
-    6: {
-      seed: 507,
-      links: { left: 5, right: 7, up: null, down: null },
-      hint: 'DR. VIKTOR ZINS: "Switzerland prefers consolidation, Herr Brunner."',
-      grid: [
-        '............',
-        '............',
-        '__________P_',
-        '##........##',
-      ],
       plates: [
-        { col: 10, row: 2, targetId: 'l5_exit', action: 'open' },
-      ],
-      enemies: [
-        { col: 7, row: 2, type: 'zins', facing: -1, hp: 6, skill: 5, name: 'Dr. Viktor Zins' },
+        { col: 4, row: 0, targetId: 'l5_exit', action: 'open' },
       ],
       decor: [
-        { col: 2, row: 2, type: 'torch' },
-        { col: 10, row: 2, type: 'torch' },
+        { col: 8, row: 0, type: 'torch' },
+        { col: 2, row: 2, type: 'sign' },
       ],
     },
 
-    // Room 7: Sphinx Observatory Dome — Open-Glass Summit & Rescue Celine Amrein!
-    7: {
-      seed: 508,
-      links: { left: 6, right: null, up: null, down: null },
-      hint: 'Reach Celine at the cryptographic console to abort Operation Sechselaeuten!',
+    // Room 8: Meyrin Fiber Bore Exit
+    8: {
+      seed: 1509,
+      links: { left: 7, right: null, up: null, down: null },
+      hint: 'GENEVA FIBER BORE OPEN. CERN SECTOR 4 LIES WEST.',
       grid: [
-        '###......###',
-        '###......###',
+        '############',
+        '#_____.____#',
         '_______E___#',
         '############',
       ],
@@ -164,9 +202,8 @@ export const level5 = {
         { id: 'l5_exit', col: 7, row: 2 },
       ],
       decor: [
-        { col: 9, row: 2, type: 'celine' },
-        { col: 4, row: 2, type: 'torch' },
-        { col: 10, row: 2, type: 'torch' },
+        { col: 5, row: 2, type: 'torch' },
+        { col: 9, row: 2, type: 'torch' },
         { col: 7, row: 1, type: 'banner' },
       ],
     },

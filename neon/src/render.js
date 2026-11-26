@@ -7,13 +7,14 @@ import {
   VIEW_W, VIEW_H, PLAY_H, HUD_H, COLS, ROWS, TILE_W, TILE_H, FLOOR_THICK,
   floorY, tileCenterX,
 } from './level.js';
+import { TITLE_TEXT, LEVEL_INTROS, DEATH_SUBLINES } from './story.js';
 
 // ---------------------------------------------------------------------------
-// Per-level architectural palettes (harmonized with src/backdrops.js)
+// Per-level architectural palettes (10 Swiss locations harmonized with backdrops.js)
 // ---------------------------------------------------------------------------
 
 const LEVEL_THEMES = [
-  // 0: Paradeplatz Vaults (emerald marble + warm brass)
+  // 0: Paradeplatz Vaults, Zurich (emerald marble + warm brass)
   {
     wallFill: '#17261f',
     wallDark: '#0d1712',
@@ -30,7 +31,24 @@ const LEVEL_THEMES = [
     spikeCol: '#b7c2bc',
     slicerCol: '#c9a64c',
   },
-  // 1: Gotthard Reduit (reinforced bunker concrete + hazard ochre)
+  // 1: Olten SBB Gleis 0, Solothurn (brushed transit concrete + SBB cobalt + sodium ochre)
+  {
+    wallFill: '#2d3338',
+    wallDark: '#171b1f',
+    wallHi: '#454e56',
+    wallTrim: '#1e467a',
+    floorTop: '#6c757d',
+    floorFace: '#394047',
+    floorDark: '#181c20',
+    floorTrim: '#d49a38',
+    gateBar: '#5c6670',
+    gateHi: '#9ca8b5',
+    exitFrame: '#1e467a',
+    exitInner: '#0b1118',
+    spikeCol: '#c8d0d8',
+    slicerCol: '#c9242b',
+  },
+  // 2: Gotthard Reduit Fortress, Uri/Ticino (blast concrete + hazard ochre)
   {
     wallFill: '#292e2c',
     wallDark: '#161a19',
@@ -47,7 +65,41 @@ const LEVEL_THEMES = [
     spikeCol: '#c6ccc8',
     slicerCol: '#d49a38',
   },
-  // 2: CERN Geneva (cryo-steel + cyan/magenta photonics)
+  // 3: Grande Dixence Dam Galleries, Valais (brutalist concrete + hydro-teal)
+  {
+    wallFill: '#2b333a',
+    wallDark: '#161c21',
+    wallHi: '#424e59',
+    wallTrim: '#1a4d5c',
+    floorTop: '#6c7a86',
+    floorFace: '#35414c',
+    floorDark: '#172028',
+    floorTrim: '#3fa7b8',
+    gateBar: '#4c6573',
+    gateHi: '#7db5c7',
+    exitFrame: '#3fa7b8',
+    exitInner: '#091820',
+    spikeCol: '#bdd4de',
+    slicerCol: '#3fa7b8',
+  },
+  // 4: Chateau de Chillon Viaduct Vaults, Vaud (Savoyard limestone + turquoise hydro)
+  {
+    wallFill: '#383129',
+    wallDark: '#1f1b16',
+    wallHi: '#544a3e',
+    wallTrim: '#265359',
+    floorTop: '#7d7060',
+    floorFace: '#463e34',
+    floorDark: '#201c17',
+    floorTrim: '#48939c',
+    gateBar: '#527073',
+    gateHi: '#8cbac0',
+    exitFrame: '#8c785c',
+    exitInner: '#12100d',
+    spikeCol: '#cfc6b8',
+    slicerCol: '#48b8c4',
+  },
+  // 5: CERN Ring Sector 4, Geneva (cryo-steel + cyan/magenta photonics)
   {
     wallFill: '#182742',
     wallDark: '#0d1628',
@@ -64,7 +116,41 @@ const LEVEL_THEMES = [
     spikeCol: '#b2e4f8',
     slicerCol: '#ff427a',
   },
-  // 3: Jungfraujoch Ice Palace (glacial blue ice + frost white)
+  // 6: Bundeshaus Sub-Archives & Federal Mint, Bern (Bernese green-gold sandstone + brass)
+  {
+    wallFill: '#2d3326',
+    wallDark: '#181c14',
+    wallHi: '#464f3b',
+    wallTrim: '#a68642',
+    floorTop: '#6e755c',
+    floorFace: '#3d4232',
+    floorDark: '#1c1f16',
+    floorTrim: '#a68642',
+    gateBar: '#7d6938',
+    gateHi: '#c4a85c',
+    exitFrame: '#a68642',
+    exitInner: '#10140d',
+    spikeCol: '#cfd4c4',
+    slicerCol: '#c49b40',
+  },
+  // 7: Eigerwand North-Face Gallery, Jungfraubahn (black slate + frost brass)
+  {
+    wallFill: '#1b1f29',
+    wallDark: '#0f1218',
+    wallHi: '#31384a',
+    wallTrim: '#8a7a52',
+    floorTop: '#4e5668',
+    floorFace: '#282d3a',
+    floorDark: '#13161e',
+    floorTrim: '#a8b8d0',
+    gateBar: '#566075',
+    gateHi: '#99a8c4',
+    exitFrame: '#9c8346',
+    exitInner: '#0a0e16',
+    spikeCol: '#d6e2f2',
+    slicerCol: '#6cb8e8',
+  },
+  // 8: Jungfraujoch Ice Palace, Aletsch Glacier (glacial cyan ice + frost white)
   {
     wallFill: '#264b6e',
     wallDark: '#132a42',
@@ -81,7 +167,7 @@ const LEVEL_THEMES = [
     spikeCol: '#dff7ff',
     slicerCol: '#7ce8ff',
   },
-  // 4: Sphinx Observatory (alpine slate + brass/glass summit)
+  // 9: Sphinx Observatory Summit, 3,571m (alpine slate + summit brass + beacon red)
   {
     wallFill: '#232833',
     wallDark: '#13161e',
@@ -299,6 +385,18 @@ const ANIM_CLIPS = {
     p(-1, -12.6, -2, -2, -24, -28, 30, 10, -26, -56, 74, 136, 156),
     p(-1, -12.8, 2, 0, -24, -28, 32, 12, -30, -60, 68, 130, 148),
   ],
+  combat_parried: [
+    p(-2, -12.4, -10, -6, -26, -24, 28, 12, -38, -68, 34, 134, 156),
+    p(0, -12.8, 6, 2, -24, -28, 32, 10, -28, -58, 46, 98, 118),
+  ],
+  combat_feint: [
+    p(-1, -12.4, 6, 3, -24, -28, 34, 12, -28, -58, 56, 124, 142),
+    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
+  ],
+  combat_recover: [
+    p(2, -11.9, 18, 6, -30, -32, 42, 14, -34, -62, 60, 78, 70),
+    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
+  ],
   combat_hit: [
     p(-2, -12.4, -18, -12, -26, -20, 26, 16, -48, -72, 24, 52, 62),
     p(-1, -12.8, -6, -4, -24, -26, 30, 12, -34, -64, 38, 84, 104),
@@ -512,15 +610,25 @@ export function drawCharacter(ctx, ent, time) {
     drawTapered(ctx, rHand.x, rHand.y, bladeEnd.x, bladeEnd.y, 1.0, 0.35, pal.sword);
     drawSeg(ctx, guardA.x, guardA.y, guardB.x, guardB.y, 1.8, pal.hilt);
 
-    // Readable blade-glint telegraph star during enemy strike windup!
-    if (ent.strikeTelegraph > 0 && ent.state === 'combat_strike') {
+    // Readable blade-glint telegraph star during enemy strike windup / feint!
+    if (ent.strikeTelegraph > 0 && (ent.state === 'combat_strike' || ent.state === 'combat_feint')) {
       const gx = bladeEnd.x;
       const gy = bladeEnd.y;
-      ctx.fillStyle = '#fff5a8';
-      ctx.fillRect(gx - 3.5, gy - 0.6, 7, 1.2);
-      ctx.fillRect(gx - 0.6, gy - 3.5, 1.2, 7);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(gx - 1.2, gy - 1.2, 2.4, 2.4);
+      if (ent.state === 'combat_feint') {
+        // Subtle smaller warm-amber spark for feints (distinguishable from committed lunges!)
+        ctx.fillStyle = '#f0b84a';
+        ctx.fillRect(gx - 2.2, gy - 0.5, 4.4, 1.0);
+        ctx.fillRect(gx - 0.5, gy - 2.2, 1.0, 4.4);
+      } else {
+        const starCol = ent.strikeKind === 'heavy' ? '#ff9442' :
+          ent.strikeKind === 'riposte' ? '#8cecff' : '#fff5a8';
+        const arm = ent.strikeKind === 'heavy' ? 4.2 : 3.5;
+        ctx.fillStyle = starCol;
+        ctx.fillRect(gx - arm, gy - 0.6, arm * 2, 1.2);
+        ctx.fillRect(gx - 0.6, gy - arm, 1.2, arm * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(gx - 1.2, gy - 1.2, 2.4, 2.4);
+      }
     }
   } else if (ent.hasSword && pal.sword && ent.alive) {
     // Sheathed sabre at hip
@@ -625,6 +733,10 @@ export function renderGame(ctx, game) {
     renderTitle(ctx, game);
     return;
   }
+  if (mode === 'level_select') {
+    renderLevelSelect(ctx, game);
+    return;
+  }
   if (mode === 'intro' || mode === 'interlude' || mode === 'victory' || mode === 'timeout') {
     renderStoryScreen(ctx, game);
     return;
@@ -677,8 +789,9 @@ export function renderGame(ctx, game) {
   // 7. Player
   drawCharacter(ctx, player, time);
 
-  // 8. Foreground gates & slicers (drawn over characters slightly so portcullis feels spatial)
+  // 8. Foreground gates, slicers & Alpine Foehn wind streaks
   drawRoomForegroundTraps(ctx, level, room, theme, time);
+  drawWindOverlay(ctx, level, room, time);
 
   // 8b. Climb cue: when the hero can climb from where he stands, mark the ledge corner.
   drawClimbCue(ctx, level, player, time);
@@ -764,7 +877,7 @@ function drawDecor(ctx, room, theme, time, levelId) {
     const fy = floorY(d.row);
     if (d.type === 'torch') {
       const ty = fy - 24;
-      if (levelId === 2) {
+      if (levelId === 5) {
         // CERN cryo-photonic wall lamp (cool cyan LED bar)
         ctx.fillStyle = '#1e2c44';
         ctx.fillRect(cx - 5, ty - 2, 10, 5);
@@ -779,6 +892,30 @@ function drawDecor(ctx, room, theme, time, levelId) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(cx - 2, ty - 1, 4, 1);
       } else if (levelId === 3) {
+        // Grande Dixence damp hydro fluorescent tube
+        ctx.fillStyle = '#253844';
+        ctx.fillRect(cx - 6, ty - 2, 12, 4);
+        const g = ctx.createRadialGradient(cx, ty, 1, cx, ty, 22);
+        g.addColorStop(0, 'rgba(95, 212, 226, 0.30)');
+        g.addColorStop(1, 'rgba(40, 140, 160, 0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - 22, ty - 22, 44, 44);
+        ctx.fillStyle = '#7de0ee';
+        ctx.fillRect(cx - 5, ty - 1, 10, 2);
+      } else if (levelId === 6) {
+        // Bundeshaus green-shaded federal accountant lamp
+        ctx.fillStyle = '#7a632c';
+        ctx.fillRect(cx - 1, ty, 2, 6);
+        ctx.fillStyle = '#1d6b42';
+        ctx.fillRect(cx - 5, ty - 3, 10, 4);
+        const g = ctx.createRadialGradient(cx, ty + 2, 1, cx, ty + 4, 22);
+        g.addColorStop(0, 'rgba(130, 220, 155, 0.30)');
+        g.addColorStop(1, 'rgba(80, 160, 100, 0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - 22, ty - 16, 44, 40);
+        ctx.fillStyle = '#d8f5bc';
+        ctx.fillRect(cx - 3, ty + 1, 6, 1);
+      } else if (levelId === 8) {
         // Jungfraujoch frosted crystal ice lantern
         ctx.fillStyle = '#365e82';
         ctx.fillRect(cx - 3, ty - 6, 6, 2);
@@ -792,8 +929,8 @@ function drawDecor(ctx, room, theme, time, levelId) {
         ctx.fillRect(cx - 2, ty - 4, 4, 6);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(cx - 1, ty - 3, 2, 4);
-      } else if (levelId === 4) {
-        // Sphinx Observatory alpine summit floodlight on mast
+      } else if (levelId === 9 || levelId === 7) {
+        // Sphinx / Eigerwand alpine summit floodlight on mast
         ctx.fillStyle = '#485266';
         ctx.fillRect(cx - 1, fy - 24, 2, 24);
         ctx.fillStyle = '#252c38';
@@ -806,7 +943,7 @@ function drawDecor(ctx, room, theme, time, levelId) {
         ctx.fillStyle = '#fff5cc';
         ctx.fillRect(cx - 3, fy - 26, 6, 2);
       } else {
-        // Classic Paradeplatz / Gotthard wall torch
+        // Classic Paradeplatz / Olten / Gotthard / Chillon warm wall sconce
         ctx.fillStyle = '#4a3a22';
         ctx.fillRect(cx - 1, ty, 2, 8);
         const flick = Math.sin(time * 13 + d.col * 3) * 1.5;
@@ -820,6 +957,32 @@ function drawDecor(ctx, room, theme, time, levelId) {
         ctx.fillStyle = '#fff0a0';
         ctx.fillRect(cx - 1, ty - 3, 2, 2);
       }
+    } else if (d.type === 'crt') {
+      // 1979 Reduit amber copper-line CRT terminal
+      ctx.fillStyle = '#2b322e';
+      ctx.fillRect(cx - 8, fy - 22, 16, 14);
+      ctx.fillStyle = '#121a14';
+      ctx.fillRect(cx - 6, fy - 20, 12, 9);
+      const blink = Math.sin(time * 5) > 0;
+      ctx.fillStyle = '#e8a838';
+      ctx.fillRect(cx - 5, fy - 18, 9, 1);
+      ctx.fillRect(cx - 5, fy - 15, 7, 1);
+      if (blink) ctx.fillRect(cx - 5, fy - 13, 3, 1);
+      ctx.fillStyle = '#38403b';
+      ctx.fillRect(cx - 4, fy - 8, 8, 8);
+    } else if (d.type === 'note') {
+      // Celine's bright yellow scribbled audit note marking true override routes
+      ctx.fillStyle = '#f2d95c';
+      ctx.fillRect(cx - 5, fy - 28, 10, 11);
+      ctx.fillStyle = '#d9b538';
+      ctx.fillRect(cx - 5, fy - 28, 10, 2);
+      ctx.fillStyle = '#2a3326';
+      ctx.fillRect(cx - 3, fy - 24, 6, 1);
+      ctx.fillRect(cx - 3, fy - 22, 5, 1);
+      ctx.fillRect(cx - 3, fy - 20, 6, 1);
+      // Red pin tack
+      ctx.fillStyle = '#d62828';
+      ctx.fillRect(cx - 1, fy - 29, 2, 2);
     } else if (d.type === 'banner') {
       ctx.fillStyle = '#8a1c22';
       ctx.fillRect(cx - 6, fy - 38, 12, 22);
@@ -1041,15 +1204,31 @@ function drawRoomTiles(ctx, level, room, theme, time) {
         }
       }
 
-      // Pressure plates
+      // Pressure plates (open P, close Q, and weighted hold-plates)
       if (ch === 'P' || ch === 'Q') {
         const plate = room.plates.get(`${c},${r}`);
         const down = plate && plate.pressed;
         const py = down ? fyy : fyy - 2;
-        ctx.fillStyle = ch === 'Q' ? '#9c2c34' : theme.floorTrim;
-        ctx.fillRect(fx + 5, py, TILE_W - 10, down ? 1 : 2);
-        ctx.fillStyle = ch === 'Q' ? '#ff6470' : '#f2d98d';
-        ctx.fillRect(fx + 7, py, TILE_W - 14, 1);
+        if (plate && plate.hold) {
+          ctx.fillStyle = '#226c75';
+          ctx.fillRect(fx + 4, py, TILE_W - 8, down ? 1 : 2);
+          ctx.fillStyle = '#7ce8f0';
+          ctx.fillRect(fx + 6, py, TILE_W - 12, 1);
+          if (plate.pinnedByDebris) {
+            // Visible fallen masonry slab weighting the hold-plate!
+            ctx.fillStyle = theme.floorFace;
+            ctx.fillRect(fx + 6, fyy - 5, TILE_W - 12, 5);
+            ctx.fillStyle = theme.floorTop;
+            ctx.fillRect(fx + 6, fyy - 5, TILE_W - 12, 2);
+            ctx.fillStyle = '#090c10';
+            ctx.fillRect(fx + 14, fyy - 5, 1, 4);
+          }
+        } else {
+          ctx.fillStyle = ch === 'Q' ? '#9c2c34' : theme.floorTrim;
+          ctx.fillRect(fx + 5, py, TILE_W - 10, down ? 1 : 2);
+          ctx.fillStyle = ch === 'Q' ? '#ff6470' : '#f2d98d';
+          ctx.fillRect(fx + 7, py, TILE_W - 14, 1);
+        }
       }
 
       // Spikes
@@ -1234,6 +1413,48 @@ function drawRoomForegroundTraps(ctx, level, room, theme, time) {
       }
     }
   }
+}
+
+function drawWindOverlay(ctx, level, room, time) {
+  if (!room.wind) return;
+  const ws = level.getWindState(room.id, time);
+  if (!ws.active && !ws.warning) return;
+
+  const dir = ws.dir;
+  const cols = ws.cols;
+  const minX = cols ? Math.min(...cols) * TILE_W : 0;
+  const maxX = cols ? (Math.max(...cols) + 1) * TILE_W : VIEW_W;
+  const spanW = Math.max(32, maxX - minX);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(minX, 0, spanW, PLAY_H);
+  ctx.clip();
+
+  const count = ws.active ? 26 : 10;
+  const speed = ws.active ? 260 : 95;
+  const alpha = ws.active ? 0.55 * ws.strength : 0.26;
+  const len = ws.active ? 18 : 8;
+
+  ctx.fillStyle = ws.active ? `rgba(220, 242, 255, ${alpha.toFixed(3)})` : `rgba(185, 220, 248, ${alpha.toFixed(3)})`;
+  for (let i = 0; i < count; i++) {
+    const seedX = (i * 73) % spanW;
+    const seedY = (i * 37 + 11) % (PLAY_H - 12);
+    const offset = ((time * speed * dir + seedX) % (spanW + len) + (spanW + len)) % (spanW + len);
+    const sx = minX + offset - len;
+    ctx.fillRect(Math.round(sx), Math.round(seedY + Math.sin(time * 8 + i) * 1.5), len, 1);
+  }
+
+  // Crisp wind direction indicator pill at top of wind zone
+  const label = ws.active
+    ? (dir > 0 ? 'FOEHN >>>' : '<<< FOEHN')
+    : (dir > 0 ? 'GUST >' : '< GUST');
+  drawPixelText(ctx, label, minX + spanW / 2, 12, {
+    color: ws.active ? '#dff4ff' : '#96bad6',
+    align: 'center',
+    shadow: '#08101c',
+  });
+  ctx.restore();
 }
 
 function drawItems(ctx, room, time) {
@@ -1497,24 +1718,29 @@ function drawHUD(ctx, game) {
   }
   if (activeEnemy) {
     const pipColor = activeEnemy.type === 'deepfake' ? '#45d4f5' :
-      activeEnemy.type === 'zins' ? '#e6a832' : '#d67028';
+      activeEnemy.type === 'zins' ? (activeEnemy.bossPhase >= 3 ? '#ff4a5a' : activeEnemy.bossPhase === 2 ? '#f5b83d' : '#e6a832') : '#d67028';
+    const pipStep = activeEnemy.maxHp > 6 ? 8 : 10;
+    const pipW = activeEnemy.maxHp > 6 ? 6 : 7;
     for (let i = 0; i < activeEnemy.maxHp; i++) {
-      const px = VIEW_W - 16 - i * 10;
+      const px = VIEW_W - 14 - i * pipStep;
       if (i < activeEnemy.hp) {
         ctx.fillStyle = pipColor;
-        ctx.fillRect(px, pipY, 7, 8);
+        ctx.fillRect(px, pipY, pipW, 8);
         ctx.fillStyle = 'rgba(255,255,255,0.45)';
-        ctx.fillRect(px + 1, pipY + 1, 5, 1);
+        ctx.fillRect(px + 1, pipY + 1, pipW - 2, 1);
       } else {
         ctx.strokeStyle = '#4a4038';
         ctx.lineWidth = 1;
-        ctx.strokeRect(px + 0.5, pipY + 0.5, 6, 7);
+        ctx.strokeRect(px + 0.5, pipY + 0.5, pipW - 1, 7);
       }
     }
     if (activeEnemy.name) {
-      const pipsLeft = VIEW_W - 16 - Math.max(0, activeEnemy.maxHp - 1) * 10 - 6;
-      drawPixelText(ctx, activeEnemy.name, pipsLeft, y0 + 12, {
-        color: '#d4cfc2',
+      const pipsLeft = VIEW_W - 14 - Math.max(0, activeEnemy.maxHp - 1) * pipStep - 5;
+      const label = activeEnemy.type === 'zins' && activeEnemy.bossPhase > 1
+        ? `DR. ZINS ${activeEnemy.bossPhase === 3 ? 'III' : 'II'}`
+        : activeEnemy.name;
+      drawPixelText(ctx, label, pipsLeft, y0 + 12, {
+        color: activeEnemy.type === 'zins' && activeEnemy.bossPhase >= 3 ? '#ff9ea6' : '#d4cfc2',
         align: 'right',
         baseline: 'middle',
       });
@@ -1541,7 +1767,7 @@ function renderTitle(ctx, game) {
   ctx.fillRect(VIEW_W / 2 - 4, 19, 8, 4);
 
   // Crisp pixel display title (scale 2 = razor sharp 8x12 blocks!)
-  drawPixelText(ctx, 'PRINCE OF ZURICH', VIEW_W / 2, 40, {
+  drawPixelText(ctx, TITLE_TEXT.title, VIEW_W / 2, 38, {
     scale: 2,
     color: '#f5f1e6',
     align: 'center',
@@ -1549,8 +1775,15 @@ function renderTitle(ctx, game) {
     shadow: '#090d14',
   });
 
-  drawPixelText(ctx, 'OPERATION SECHSELAEUTEN - 60 MINUTES TO MIDNIGHT', VIEW_W / 2, 58, {
+  drawPixelText(ctx, TITLE_TEXT.subtitle, VIEW_W / 2, 55, {
     color: '#e0bf72',
+    align: 'center',
+    baseline: 'middle',
+    shadow: '#090d14',
+  });
+
+  drawPixelText(ctx, TITLE_TEXT.tagline, VIEW_W / 2, 67, {
+    color: '#9db0c7',
     align: 'center',
     baseline: 'middle',
     shadow: '#090d14',
@@ -1558,26 +1791,30 @@ function renderTitle(ctx, game) {
 
   // Menu box
   const hasSave = !!game.savedGame;
-  const menuY = 128;
+  const menuY = hasSave ? 116 : 124;
   const items = hasSave
     ? [
-        { label: `CONTINUE (LEVEL ${game.savedGame.levelIndex + 1} - ${formatTime(game.savedGame.timeRemaining)})` },
+        { label: `CONTINUE (L${game.savedGame.levelIndex + 1} - ${formatTime(game.savedGame.timeRemaining)})` },
         { label: 'NEW GAME' },
+        { label: 'LEVEL SELECT (1-10)' },
       ]
-    : [{ label: 'START GAME' }];
+    : [
+        { label: 'START GAME' },
+        { label: 'LEVEL SELECT (1-10)' },
+      ];
 
   for (let i = 0; i < items.length; i++) {
     const sel = i === game.titleSelection;
-    const y = menuY + i * 20;
+    const y = menuY + i * 19;
     if (sel) {
       ctx.fillStyle = 'rgba(201, 36, 43, 0.88)';
-      ctx.fillRect(VIEW_W / 2 - 118, y - 8, 236, 16);
+      ctx.fillRect(VIEW_W / 2 - 118, y - 8, 236, 15);
       ctx.strokeStyle = '#f5f1e6';
       ctx.lineWidth = 1;
-      ctx.strokeRect(VIEW_W / 2 - 117.5, y - 7.5, 235, 15);
+      ctx.strokeRect(VIEW_W / 2 - 117.5, y - 7.5, 235, 14);
     } else {
       ctx.fillStyle = 'rgba(10, 14, 22, 0.74)';
-      ctx.fillRect(VIEW_W / 2 - 118, y - 8, 236, 16);
+      ctx.fillRect(VIEW_W / 2 - 118, y - 8, 236, 15);
     }
     drawPixelText(ctx, (sel ? '> ' : '  ') + items[i].label, VIEW_W / 2, y, {
       color: sel ? '#ffffff' : '#b8c0cc',
@@ -1599,13 +1836,71 @@ function renderTitle(ctx, game) {
   });
 }
 
+function renderLevelSelect(ctx, game) {
+  drawTitleBackdrop(ctx, VIEW_W, VIEW_H, game.time, { showClock: false });
+  ctx.fillStyle = 'rgba(5, 8, 14, 0.86)';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  ctx.strokeStyle = '#c7a454';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(12.5, 12.5, VIEW_W - 25, VIEW_H - 25);
+
+  drawPixelText(ctx, 'SELECT STAGE (1-10)', VIEW_W / 2, 24, {
+    color: '#e8c468',
+    align: 'center',
+    baseline: 'middle',
+    shadow: '#05070a',
+  });
+
+  // Two columns of 5 levels
+  const colX = [24, 198];
+  for (let i = 0; i < LEVEL_INTROS.length; i++) {
+    const col = i < 5 ? 0 : 1;
+    const row = i % 5;
+    const x = colX[col];
+    const y = 46 + row * 24;
+    const sel = i === game.levelSelectIndex;
+    if (sel) {
+      ctx.fillStyle = 'rgba(201, 36, 43, 0.88)';
+      ctx.fillRect(x - 4, y - 7, 166, 17);
+      ctx.strokeStyle = '#f5f1e6';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 3.5, y - 6.5, 165, 16);
+    } else {
+      ctx.fillStyle = 'rgba(14, 20, 30, 0.72)';
+      ctx.fillRect(x - 4, y - 7, 166, 17);
+    }
+    const num = String(i + 1).padStart(2, ' ');
+    const info = LEVEL_INTROS[i];
+    drawPixelText(ctx, `${sel ? '>' : ' '}${num}. ${info.shortName}`, x, y + 1, {
+      color: sel ? '#ffffff' : '#c0cad8',
+      baseline: 'middle',
+    });
+  }
+
+  const chosen = LEVEL_INTROS[game.levelSelectIndex];
+  if (chosen) {
+    drawPixelText(ctx, `${chosen.title} - ${chosen.subtitle}`, VIEW_W / 2, 176, {
+      color: '#e0bf72',
+      align: 'center',
+      baseline: 'middle',
+    });
+  }
+
+  drawPixelText(ctx, 'ARROWS: CHOOSE   ENTER/SPACE: PLAY   ESC: BACK', VIEW_W / 2, 194, {
+    color: '#9aa4b8',
+    align: 'center',
+    baseline: 'middle',
+  });
+}
+
 function renderStoryScreen(ctx, game) {
   const card = game.activeCard;
   // Background
   if (game.mode === 'intro' || game.mode === 'victory' || game.mode === 'timeout') {
     drawTitleBackdrop(ctx, VIEW_W, VIEW_H, game.time, { showClock: false });
   } else {
-    drawBackdrop(ctx, Math.min(4, game.levelIndex), VIEW_W, VIEW_H, game.time, 999);
+    drawBackdrop(ctx, game.levelIndex, VIEW_W, VIEW_H, game.time, 999);
   }
 
   ctx.fillStyle = 'rgba(5, 8, 14, 0.84)';
@@ -1629,13 +1924,24 @@ function renderStoryScreen(ctx, game) {
 
   const lines = card?.lines || [];
   for (let i = 0; i < lines.length; i++) {
-    drawPixelText(ctx, lines[i], 30, 54 + i * 13, {
+    drawPixelText(ctx, lines[i], 30, 62 + i * 16, {
       color: '#ece9e0',
     });
   }
 
+  // Optional page indicator for multi-card sequences (intro / victory / timeout)
+  if (game.cardQueue && game.cardQueue.length > 1) {
+    drawPixelText(ctx, `${game.cardIndex + 1}/${game.cardQueue.length}`, VIEW_W - 32, VIEW_H - 28, {
+      color: '#8d99ad',
+      align: 'right',
+      baseline: 'middle',
+    });
+  }
+
   // Prompt bottom
-  const prompt = game.mode === 'victory'
+  const isFinalEndCard = (game.mode === 'victory' || game.mode === 'timeout') &&
+    game.cardQueue && game.cardIndex >= game.cardQueue.length - 1;
+  const prompt = isFinalEndCard
     ? 'PRESS ENTER OR SPACE TO RETURN TO TITLE'
     : 'PRESS ENTER OR SPACE TO CONTINUE';
   drawPixelText(ctx, prompt, VIEW_W / 2, VIEW_H - 28, {
@@ -1684,22 +1990,22 @@ function drawDeathOverlay(ctx, game) {
   ctx.fillRect(0, 0, VIEW_W, PLAY_H);
 
   ctx.fillStyle = 'rgba(8, 10, 16, 0.90)';
-  ctx.fillRect(58, 64, VIEW_W - 116, 62);
+  ctx.fillRect(34, 64, VIEW_W - 68, 62);
   ctx.strokeStyle = '#d1343a';
   ctx.lineWidth = 1;
-  ctx.strokeRect(58.5, 64.5, VIEW_W - 117, 61);
+  ctx.strokeRect(34.5, 64.5, VIEW_W - 69, 61);
 
-  drawPixelText(ctx, game.deathReason || 'PRINZ HAS FALLEN', VIEW_W / 2, 82, {
+  drawPixelText(ctx, game.deathReason || 'INSURANCE DOES NOT COVER THIS.', VIEW_W / 2, 82, {
     color: '#ff6b70',
     align: 'center',
     baseline: 'middle',
   });
-  drawPixelText(ctx, 'THE CLOCK KEEPS RUNNING...', VIEW_W / 2, 98, {
+  drawPixelText(ctx, DEATH_SUBLINES.line2, VIEW_W / 2, 98, {
     color: '#d8dce4',
     align: 'center',
     baseline: 'middle',
   });
-  drawPixelText(ctx, 'PRESS R, SPACE OR ENTER TO RETRY', VIEW_W / 2, 113, {
+  drawPixelText(ctx, DEATH_SUBLINES.line3, VIEW_W / 2, 113, {
     color: '#f0d27a',
     align: 'center',
     baseline: 'middle',

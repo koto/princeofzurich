@@ -237,6 +237,19 @@ export class AudioEngine {
       case 'telegraph':
         this._tone(860, 0.055, 'sine', 0.04, 1280);
         break;
+      case 'riposteTelegraph':
+        this._tone(1120, 0.055, 'triangle', 0.05, 1620);
+        break;
+      case 'heavyTelegraph':
+        this._tone(620, 0.075, 'sawtooth', 0.045, 940);
+        break;
+      case 'feint':
+        this._tone(980, 0.035, 'sine', 0.03, 820);
+        break;
+      case 'bossPhase':
+        this._tone(330, 0.14, 'triangle', 0.09, 440, 0);
+        this._tone(494, 0.20, 'triangle', 0.10, 660, 0.10);
+        break;
       case 'strike':
         this._noise(0.08, 0.07, 2400);
         this._tone(420, 0.07, 'triangle', 0.06, 180);
@@ -282,6 +295,10 @@ export class AudioEngine {
         break;
       case 'ui':
         this._tone(520, 0.05, 'triangle', 0.06, 620);
+        break;
+      case 'wind':
+        this._noise(0.55, 0.065, 620);
+        this._tone(165, 0.50, 'sine', 0.03, 240);
         break;
     }
   }
