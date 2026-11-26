@@ -1,198 +1,193 @@
 // src/levels/level2.js
-// Level 2: Gotthard Reduit Army Bunker (10 rooms)
-// Teaches: proximity spikes (safe with Shift careful-step), 2-tile running jumps,
-// survivable vertical recovery shafts, close-plates, poison decoy, and pit/spike combat.
+// Level 2: Olten SBB Gleis 0 (Solothurn, 396m - 23:06 CET) (9 rooms)
+// One New Gameplay Idea: Red Lockdown Close-Plates (Q) & Tight Timed Bulkheads.
+// Set-Piece: The Midnight Transfer Gantry (Room 5) — 9.5s departure bulkhead + twin Q plates.
 
 export const level2 = {
   id: 1,
-  name: 'Gotthard Reduit Bunker',
-  subtitle: '23:12 — Alpine Defense Corridor',
+  name: 'Olten SBB Gleis 0',
+  subtitle: 'SOLOTHURN (396M) - 23:06',
   ice: false,
   start: { room: 0, col: 1, row: 2, facing: 1, hasSword: true },
   rooms: {
-    // Room 0: Bunker Airlock (Spikes tutorial + upper gallery)
+    // Room 0: Platform 12 Access (Teaches red Q close-plate vs timed bulkhead on safe layout)
     0: {
-      seed: 201,
+      seed: 1201,
       links: { left: null, right: 1, up: null, down: null },
-      hint: 'Hold SHIFT + Arrow to careful-step safely across spikes, or climb the bunker catwalk.',
+      hint: 'RED LOCKDOWN PLATES SLAM GATES SHUT. VAULT THEM.',
       grid: [
-        '############',
-        '#_____._____',
-        '#___^_______',
-        '############',
-      ],
-      items: [
-        { col: 2, row: 1, type: 'small_elixir' },
-      ],
-      decor: [
-        { col: 2, row: 2, type: 'sign' },
-        { col: 9, row: 2, type: 'torch' },
-      ],
-    },
-
-    // Room 1: Long-Jump Chasm (2-tile running jump + staggered survivable drop/climb to Room 4)
-    1: {
-      seed: 202,
-      links: { left: 0, right: 2, up: null, down: 4 },
-      hint: 'Sprint and press UP to running-jump across wide chasms. Hold SHIFT while falling to catch ledges!',
-      grid: [
-        '############',
-        '_______.___#',
-        '____..______',
-        '###__.######',
-      ],
-      decor: [
-        { col: 2, row: 2, type: 'torch' },
-        { col: 9, row: 2, type: 'torch' },
-      ],
-    },
-
-    // Room 4: Lower Maintenance Pit (2-floor survivable recovery from Room 1 + climb back up!)
-    4: {
-      seed: 203,
-      links: { left: null, right: 5, up: 1, down: null },
-      hint: 'Lower Maintenance Pit: recover your health, then climb back up the vertical shafts.',
-      grid: [
-        '####____.__#',
-        '#______.____',
-        '#___________',
-        '############',
-      ],
-      items: [
-        { col: 2, row: 1, type: 'small_elixir' },
-      ],
-      decor: [
-        { col: 3, row: 2, type: 'torch' },
-      ],
-    },
-
-    // Room 5: Ammunition Depot (Large Elixir vs bluish Poison decoy + climb up to Room 2!)
-    5: {
-      seed: 204,
-      links: { left: 4, right: null, up: 2, down: null },
-      hint: 'Crimson elixirs heal. Bluish flasks are bunker coolant — avoid!',
-      grid: [
-        '####____.__#',
-        '______.____#',
-        '___________#',
-        '############',
-      ],
-      items: [
-        { col: 3, row: 2, type: 'poison' },
-        { col: 9, row: 2, type: 'large_elixir' },
-      ],
-      enemies: [
-        { col: 6, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2, name: 'Reduit Corporal' },
-      ],
-      decor: [
-        { col: 8, row: 1, type: 'sign' },
-      ],
-    },
-
-    // Room 2: Reduit Sentry Post (Pit-edge guard duel + climb up from Room 5)
-    2: {
-      seed: 205,
-      links: { left: 1, right: 3, up: null, down: 5 },
-      grid: [
-        '############',
-        '#_____._____',
-        '____..______',
-        '###__.######',
-      ],
-      enemies: [
-        { col: 9, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2, name: 'Bunker Sentry' },
-      ],
-      decor: [
-        { col: 3, row: 2, type: 'banner' },
-      ],
-    },
-
-    // Room 3: Close-Plate Trap Corridor (Jump over red close-plate; reopen plate prevents soft-lock)
-    3: {
-      seed: 206,
-      links: { left: 2, right: 6, up: null, down: null },
-      hint: 'Red plates SLAM gates shut — jump over them!',
-      grid: [
-        '############',
-        '___._P_____#',
-        '______Q___GP',
+        '####....####',
+        '#__._P____##',
+        '#_____Q___GP',
         '############',
       ],
       plates: [
-        { col: 5, row: 1, targetId: 'l2_g_blast', action: 'open' },
-        { col: 6, row: 2, targetId: 'l2_g_blast', action: 'close' },
-        { col: 11, row: 2, targetId: 'l2_g_blast', action: 'open' },
+        { col: 5, row: 1, targetId: 'l2_g_intro', action: 'open' },
+        { col: 6, row: 2, targetId: 'l2_g_intro', action: 'close' },
+        { col: 11, row: 2, targetId: 'l2_g_intro', action: 'open' },
       ],
       gates: [
-        { id: 'l2_g_blast', col: 10, row: 2, openDuration: 11, stayOpen: false },
+        { id: 'l2_g_intro', col: 10, row: 2, openDuration: 11, stayOpen: false },
       ],
       decor: [
-        { col: 2, row: 2, type: 'torch' },
+        { col: 2, row: 2, type: 'sign' },
+        { col: 8, row: 1, type: 'torch' },
       ],
     },
 
-    // Room 6: Spike & Loose Floor Gallery (3-tier bunker shaft)
-    6: {
-      seed: 207,
-      links: { left: 3, right: 7, up: null, down: null },
+    // Room 1: Switchyard Overpass (All 4 rows 0..3 verticality + optional upper tonic)
+    1: {
+      seed: 1202,
+      links: { left: 0, right: 2, up: null, down: null },
+      hint: 'RUN + UP CLEARS WIDE PITS. HOLD SHIFT TO CATCH LEDGES.',
       grid: [
-        '############',
-        '#____.______',
-        '___L___^____',
-        '#_____######',
+        '#____._____#',
+        '#_______.__#',
+        '____._______',
+        '###____#####',
       ],
       items: [
-        { col: 9, row: 1, type: 'small_elixir' },
+        { col: 2, row: 0, type: 'small_elixir' },
+      ],
+      decor: [
+        { col: 6, row: 0, type: 'torch' },
+        { col: 9, row: 2, type: 'sign' },
+      ],
+    },
+
+    // Room 2: Points Inspection Bay (2-tile running jump + survivable sub-track recovery Room 4)
+    2: {
+      seed: 1203,
+      links: { left: 1, right: 3, up: null, down: 4 },
+      grid: [
+        '############',
+        '#_____.____#',
+        '____..______',
+        '###__.######',
+      ],
+      decor: [
+        { col: 2, row: 2, type: 'torch' },
+        { col: 9, row: 2, type: 'torch' },
+      ],
+    },
+
+    // Room 4: Sub-Track Recovery Conduit (Below Room 2 — 2-floor survivable + climb back)
+    4: {
+      seed: 1204,
+      links: { left: null, right: null, up: 2, down: null },
+      hint: 'SUB-TRACK CONDUIT: GRAB THE TONIC AND CLIMB BACK TO PLATFORM 0.',
+      grid: [
+        '####____.__#',
+        '#______.____',
+        '#__________#',
+        '############',
+      ],
+      items: [
+        { col: 2, row: 2, type: 'small_elixir' },
       ],
       decor: [
         { col: 6, row: 2, type: 'torch' },
       ],
     },
 
-    // Room 7: Officer's Bridge (Upper catwalk + knock guard onto spikes!)
-    7: {
-      seed: 208,
-      links: { left: 6, right: 8, up: null, down: null },
-      hint: 'Tip: Fence guards backward onto spikes or off ledges!',
+    // Room 3: Ticket Control (Duel Points Guard Ruedi + upper bypass catwalk)
+    3: {
+      seed: 1205,
+      links: { left: 2, right: 5, up: null, down: null },
       grid: [
         '############',
-        '_____._____#',
-        '_________^^_',
+        '#_____._____',
+        '____________',
         '############',
       ],
       enemies: [
-        { col: 6, row: 2, type: 'guard', facing: -1, hp: 4, skill: 2, name: 'Reduit Major' },
+        {
+          col: 8, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2,
+          archetype: 'sentry', name: 'Ruedi',
+          bark: '"NO TICKET, NO PLATFORM ZERO. OVERTIME STARTS NOW."',
+        },
       ],
       decor: [
         { col: 3, row: 2, type: 'banner' },
+        { col: 10, row: 1, type: 'torch' },
       ],
     },
 
-    // Room 8: Blast Door Control (3-floor pit-edge duel + upper exit plate)
-    8: {
-      seed: 209,
-      links: { left: 7, right: 9, up: null, down: null },
+    // Room 5: SET-PIECE — The Midnight Transfer Gantry (4 floors, 9.5s bulkhead, twin Q plates!)
+    5: {
+      seed: 1206,
+      links: { left: 3, right: 6, up: null, down: null },
+      hint: 'CELINE: "STAY OFF RED SENSORS. CATCH THE 23:12 GAP."',
       grid: [
-        '############',
-        '#__P___.___#',
-        '____..______',
-        '###____#####',
+        '#___P_.___##',
+        '___.___L___#',
+        '____Q__Q__GP',
+        '######___###',
       ],
       plates: [
-        { col: 3, row: 1, targetId: 'l2_exit', action: 'open' },
+        { col: 4, row: 0, targetId: 'l2_g_gantry', action: 'open' },
+        { col: 4, row: 2, targetId: 'l2_g_gantry', action: 'close' },
+        { col: 7, row: 2, targetId: 'l2_g_gantry', action: 'close' },
+        { col: 11, row: 2, targetId: 'l2_g_gantry', action: 'open' },
       ],
-      enemies: [
-        { col: 8, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2, name: 'Tunnel Guard' },
+      gates: [
+        { id: 'l2_g_gantry', col: 10, row: 2, openDuration: 12.5, stayOpen: false },
       ],
       decor: [
-        { col: 10, row: 2, type: 'torch' },
+        { col: 2, row: 2, type: 'sign' },
+        { col: 8, row: 0, type: 'torch' },
       ],
     },
 
-    // Room 9: Gotthard Express Shaft Exit
-    9: {
-      seed: 210,
-      links: { left: 8, right: null, up: null, down: null },
+    // Room 6: Postal Freight Spur (Duel Night Marshal + upper row 0 tonic)
+    6: {
+      seed: 1207,
+      links: { left: 5, right: 7, up: null, down: null },
+      grid: [
+        '#_____.____#',
+        '#___.___.###',
+        '____________',
+        '############',
+      ],
+      items: [
+        { col: 2, row: 0, type: 'small_elixir' },
+      ],
+      enemies: [
+        {
+          col: 7, row: 2, type: 'guard', facing: -1, hp: 3, skill: 2,
+          archetype: 'brawler', name: 'Night Marshal',
+          bark: '"UNSCHEDULED POINTS INSPECTION. SHOW YOUR PASS!"',
+        },
+      ],
+      decor: [
+        { col: 9, row: 2, type: 'torch' },
+      ],
+    },
+
+    // Room 7: Signal Box Alpha (4-floor vertical climb to row 0 Exit Authorization Plate)
+    7: {
+      seed: 1208,
+      links: { left: 6, right: 8, up: null, down: null },
+      grid: [
+        '#__P____.__#',
+        '#____._____#',
+        '___.___L____',
+        '##____#___##',
+      ],
+      plates: [
+        { col: 3, row: 0, targetId: 'l2_exit', action: 'open' },
+      ],
+      decor: [
+        { col: 7, row: 0, type: 'sign' },
+        { col: 2, row: 2, type: 'torch' },
+      ],
+    },
+
+    // Room 8: Gleis 0 Freight Tunnel Exit
+    8: {
+      seed: 1209,
+      links: { left: 7, right: null, up: null, down: null },
+      hint: 'ALL SECRET TUNNELS ROUTE VIA OLTEN. BOARD THE SOUTH FREIGHT.',
       grid: [
         '############',
         '#_____.____#',

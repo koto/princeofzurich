@@ -82,11 +82,12 @@ export class LevelState {
           if (ch === 'L') {
             loose.set(k, { col: c, row: r, state: 'intact', timer: 0 });
           } else if (ch === 'C') {
+            const slicerPeriod = rdef.slicerPeriod ?? this.def.slicerPeriod ?? 2.2;
             slicers.set(k, {
               col: c,
               row: r,
-              period: 2.2,
-              phase: ((c * 0.55 + r * 0.8 + roomId * 0.4) % 2.2),
+              period: slicerPeriod,
+              phase: ((c * 0.55 + r * 0.8 + roomId * 0.4) % slicerPeriod),
               wasClosed: false,
             });
           } else if (ch === '^') {
@@ -102,6 +103,8 @@ export class LevelState {
             row: p.row,
             targetId: p.targetId,
             action: p.action || 'open',
+            hold: !!p.hold,
+            pinnedByDebris: false,
             pressed: false,
             pressTimer: 0,
             wasOccupied: false,
@@ -160,6 +163,17 @@ export class LevelState {
         broken: false,
       } : null;
 
+      const wind = rdef.wind ? {
+        dir: rdef.wind.dir || 1,
+        period: rdef.wind.period ?? 6.0,
+        warnStart: rdef.wind.warnStart ?? 2.0,
+        gustStart: rdef.wind.gustStart ?? 2.8,
+        gustEnd: rdef.wind.gustEnd ?? 5.2,
+        phase: rdef.wind.phase ?? 0,
+        cols: rdef.wind.cols || null,
+        wasActive: false,
+      } : null;
+
       this.rooms.set(roomId, {
         id: roomId,
         seed: rdef.seed ?? (this.id * 100 + roomId),
@@ -178,6 +192,7 @@ export class LevelState {
         exits,
         items,
         mirror,
+        wind,
         decor: rdef.decor || [],
         scripts: rdef.scripts || [],
         hint: rdef.hint || null,
@@ -256,6 +271,33 @@ export class LevelState {
     return null;
   }
 
+  getWindState(roomId, time) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.wind) {
+      return { hasWind: false, active: false, warning: false, strength: 0, dir: 0, cols: null };
+    }
+    const w = room.wind;
+    const cycle = ((time + w.phase) % w.period + w.period) % w.period;
+    const active = cycle >= w.gustStart && cycle < w.gustEnd;
+    const warning = !active && cycle >= w.warnStart && cycle < w.gustStart;
+    let strength = 0;
+    if (active) {
+      const rampIn = Math.min(1, (cycle - w.gustStart) / 0.25);
+      const rampOut = Math.min(1, (w.gustEnd - cycle) / 0.25);
+      strength = Math.min(rampIn, rampOut);
+    } else if (warning) {
+      strength = 0.25 * ((cycle - w.warnStart) / Math.max(0.1, w.gustStart - w.warnStart));
+    }
+    return { hasWind: true, active, warning, strength, dir: w.dir, cols: w.cols };
+  }
+
+  isColInWind(roomId, col) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.wind) return false;
+    if (!room.wind.cols) return true;
+    return room.wind.cols.includes(col);
+  }
+
   getSlicerState(roomId, col, row, time) {
     const room = this.rooms.get(roomId);
     if (!room) return { closed: false, openness: 1, warning: false };
@@ -276,13 +318,13 @@ export class LevelState {
     return { closed: false, openness: p, warning: false };
   }
 
-  triggerLooseFloor(roomId, col, row, audio) {
+  triggerLooseFloor(roomId, col, row, audio, delay = 0.42) {
     const room = this.rooms.get(roomId);
     if (!room) return;
     const l = room.loose.get(`${col},${row}`);
     if (l && l.state === 'intact') {
       l.state = 'shaking';
-      l.timer = 0.42;
+      l.timer = delay;
       audio?.play('looseShake');
     }
   }
@@ -370,17 +412,47 @@ export class LevelState {
         }
       }
 
-      // Plates reset occupation if nobody is standing on them
+      // Plates reset occupation if nobody is standing on them (hold-plates stay depressed when weighted by debris or a resting guard!)
       for (const plate of room.plates.values()) {
-        let occupied = false;
+        let occupied = plate.pinnedByDebris;
         for (const ent of entities) {
-          if (!ent || !ent.alive || ent.roomId !== room.id) continue;
+          if (!ent || ent.roomId !== room.id) continue;
+          // Hold-plates also register a defeated guard's resting body on the pad!
+          if (!ent.alive && !(plate.hold && ent.grounded && !ent.hiddenAfterDeath)) continue;
           if (ent.grounded && colOfX(ent.x) === plate.col && ent.row === plate.row) {
             occupied = true;
             this.triggerPlate(room.id, plate.col, plate.row, audio, onEvent);
           }
         }
+        if (plate.pinnedByDebris) {
+          plate.pressed = true;
+          const targets = Array.isArray(plate.targetId) ? plate.targetId : [plate.targetId];
+          for (const tid of targets) {
+            const g = this.gatesById.get(tid);
+            if (g) {
+              g.targetOpen = 1;
+              g.stayOpen = true;
+            }
+            const ex = this.exitsById.get(tid);
+            if (ex && !ex.isOpen) {
+              ex.isOpen = true;
+              onEvent?.('exitOpened', ex);
+            }
+          }
+        }
         if (!occupied) {
+          if (plate.hold && plate.wasOccupied) {
+            // Release hold-plate -> close its target gate smoothly
+            const targets = Array.isArray(plate.targetId) ? plate.targetId : [plate.targetId];
+            for (const tid of targets) {
+              const g = this.gatesById.get(tid);
+              if (g && !g.stayOpen) {
+                g.targetOpen = 0;
+                g.timer = 0;
+                audio?.play('gate');
+              }
+            }
+          }
           plate.wasOccupied = false;
           if (plate.pressTimer > 0) {
             plate.pressTimer -= dt;
@@ -418,7 +490,7 @@ export class LevelState {
         }
       }
 
-      // Rhythmic beam shutter audio when player is in this room
+      // Rhythmic beam shutter & Foehn wind audio when player is in this room
       const playerEnt = entities[0];
       if (playerEnt && playerEnt.roomId === room.id) {
         for (const s of room.slicers.values()) {
@@ -427,6 +499,13 @@ export class LevelState {
             audio?.play('slicer');
           }
           s.wasClosed = st.closed;
+        }
+        if (room.wind) {
+          const ws = this.getWindState(room.id, time);
+          if (ws.active && !room.wind.wasActive) {
+            audio?.play('wind');
+          }
+          room.wind.wasActive = ws.active;
         }
       }
 
@@ -509,6 +588,11 @@ export class LevelState {
             break;
           } else if (isWalkableBaseTile(ch) || ch === '#') {
             if (ch === 'P' || ch === 'Q') {
+              const targetRoom = this.rooms.get(d.roomId);
+              const targetPlate = targetRoom?.plates.get(`${d.col},${r}`);
+              if (targetPlate && targetPlate.hold) {
+                targetPlate.pinnedByDebris = true;
+              }
               this.triggerPlate(d.roomId, d.col, r, audio, onEvent);
             }
             audio?.play('land');

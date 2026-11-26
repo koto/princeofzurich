@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // tools/validate.mjs
-// Validates all 5 levels:
+// Validates all 10 levels:
 //  1. Grid dimensions, link symmetry, plate/gate/exit consistency
 //  2. No '.' directly above '#' (prevents invisible floors over visual pits)
 //  3. No fatal >=3-floor drops onto walkable floors in linked lower rooms (catches broken recovery pits)
-//  4. Coarse reachability BFS from start -> plates -> gates -> exit (and sword if unarmed)
+//  4. Coarse reachability BFS from start -> plates (incl. vertical falling-debris triggers & tailwind jumps) -> gates -> exit
 //  5. Return-reachability (soft-lock check): from EVERY reachable non-lethal tile, the exit must remain reachable!
 
 import { LEVELS } from '../src/levels/index.js';
@@ -125,9 +125,12 @@ function getNeighbors(level, cur, gateMap, unlocked) {
     }
   }
 
-  // C. Standing jump (clears 1 tile) & Running jump (clears 2 tiles)
+  // C. Standing jump (clears 1 tile), Running jump (clears 2 tiles), & Tailwind jump (clears 3 tiles in wind.dir!)
+  const curRoom = level.rooms[cur.roomId];
   for (const dir of [-1, 1]) {
-    for (const span of [2, 3]) {
+    const spans = [2, 3];
+    if (curRoom?.wind && curRoom.wind.dir === dir) spans.push(4);
+    for (const span of spans) {
       let clear = true;
       for (let step = 1; step < span; step++) {
         const mid = resolvePos(level, cur.roomId, cur.c + dir * step, cur.r);
@@ -187,9 +190,9 @@ function validateLevel(level) {
       for (let c = 0; c < COLS; c++) {
         const ch = rm.grid[r][c];
         if (isWalkableBaseTile(ch)) floorsUsed.add(r);
-        // No '.' directly above '#' (causes invisible floor / visual mismatch)
-        if (ch === '.' && r + 1 < ROWS && rm.grid[r + 1][c] === '#') {
-          error(tag, `Room ${rid} (${c},${r}): '.' sits directly above '#' (use '_' or align shaft)`);
+        // No '.' or 'L' directly above '#' (causes invisible floor / falling through wall block)
+        if ((ch === '.' || ch === 'L') && r + 1 < ROWS && rm.grid[r + 1][c] === '#') {
+          error(tag, `Room ${rid} (${c},${r}): '${ch}' sits directly above '#' (use '_' or align shaft)`);
         }
       }
     }
@@ -304,6 +307,37 @@ function validateLevel(level) {
             changed = true;
           }
         }
+      }
+
+      // Vertical falling-debris trigger: if standing on 'L' OR standing directly under 'L' (bump!),
+      // trace falling slab down through '.' / chained 'L' to see if it depresses a lower 'P' plate!
+      const triggerDebrisFrom = (startPos) => {
+        let curD = startPos;
+        for (let step = 0; step < 12; step++) {
+          curD = resolvePos(level, curD.roomId, curD.c, curD.r + 1);
+          if (!curD) break;
+          const dch = tileAt(level, curD.roomId, curD.c, curD.r);
+          if (dch === '#') break;
+          if (dch === '.' || dch === 'L') continue;
+          const dpl = plateMap.get(`${curD.roomId},${curD.c},${curD.r}`);
+          if (dpl) {
+            const targets = Array.isArray(dpl.targetId) ? dpl.targetId : [dpl.targetId];
+            for (const tid of targets) {
+              if (!unlocked.has(tid)) {
+                unlocked.add(tid);
+                changed = true;
+              }
+            }
+          }
+          break;
+        }
+      };
+      if (tileAt(level, cur.roomId, cur.c, cur.r) === 'L') {
+        triggerDebrisFrom(cur);
+      }
+      const overhead = resolvePos(level, cur.roomId, cur.c, cur.r - 1);
+      if (overhead && tileAt(level, overhead.roomId, overhead.c, overhead.r) === 'L') {
+        triggerDebrisFrom(overhead);
       }
 
       for (const nb of getNeighbors(level, cur, gateMap, unlocked)) {
@@ -435,5 +469,5 @@ if (totalErrors > 0) {
   console.error(`\nVALIDATION FAILED with ${totalErrors} error(s).`);
   process.exit(1);
 } else {
-  console.log('\nALL 5 LEVELS PASSED VALIDATION!');
+  console.log(`\nALL ${LEVELS.length} LEVELS PASSED VALIDATION!`);
 }

@@ -23,6 +23,7 @@ const CATCH_EDGE_WINDOW = 22;         // px horizontal window for catching a led
 // parabolic arc (ballistic), then absorb on landing.
 const STAND_JUMP = { dist: 56, dur: 0.56, arc: 17, windup: 0.1 };
 const RUN_JUMP = { dist: 96, dur: 0.58, arc: 20, windup: 0 };
+const TAILWIND_RUN_JUMP = { dist: 132, dur: 0.68, arc: 24, windup: 0 };
 const SKID_TIME = 0.34;      // stone: ~half a tile of boot slide
 const ICE_SKID_TIME = 0.7;   // glacier ice: ~a full tile
 const COYOTE_TIME = 0.1;     // s after running off an edge in which Up still launches a running jump
@@ -68,9 +69,18 @@ export class Player {
     this.climbTo = null;
     this.pickupItem = null;
     this.strikeHitDone = false;
+    this.strikeId = 0;
+    this.strikeIsRiposte = false;
+    this.strikeWhiffed = false;
     this.riposteWindow = 0;
     this.riposteQueued = false;
     this.parrySuccess = false;
+    this.parryActive = false;
+    this.parryCooldown = 0;
+    this.emptyParryStreak = 0;
+    this.emptyParryDecay = 0;
+    this.consecutiveStrikes = 0;
+    this.strikeChainDecay = 0;
     this.lastSafePos = { roomId: this.roomId, x: this.x, y: this.y, row: this.row };
 
     // Callbacks injected by Game
@@ -79,6 +89,8 @@ export class Player {
     this.onExitLevel = null;
     this.onEvent = null;
     this.godMode = false;
+    this.currentTime = 0;
+    this._bracingShift = false;
   }
 
   takeDamage(amount, reason = 'injury', knockDir = 0) {
@@ -136,9 +148,20 @@ export class Player {
   }
 
   update(dt, time, input, level, enemies, audio) {
+    this.currentTime = time;
+    this._bracingShift = !!(input && input.shift);
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt);
     if (this.sheathedLock > 0) this.sheathedLock = Math.max(0, this.sheathedLock - dt);
     if (this.riposteWindow > 0) this.riposteWindow = Math.max(0, this.riposteWindow - dt);
+    if (this.parryCooldown > 0) this.parryCooldown = Math.max(0, this.parryCooldown - dt);
+    if (this.emptyParryDecay > 0) {
+      this.emptyParryDecay = Math.max(0, this.emptyParryDecay - dt);
+      if (this.emptyParryDecay === 0) this.emptyParryStreak = 0;
+    }
+    if (this.strikeChainDecay > 0) {
+      this.strikeChainDecay = Math.max(0, this.strikeChainDecay - dt);
+      if (this.strikeChainDecay === 0) this.consecutiveStrikes = 0;
+    }
     if (this.climbIntent > 0) this.climbIntent = Math.max(0, this.climbIntent - dt);
     if (this.coyote > 0) this.coyote = Math.max(0, this.coyote - dt);
 
@@ -208,8 +231,9 @@ export class Player {
       case 'combat_retreat':
         this._updateCombatStep(dt, input, level, audio);
         break;
-      case 'combat_strike': this._updateCombatStrike(dt, level, enemies, audio); break;
+      case 'combat_strike': this._updateCombatStrike(dt, input, level, enemies, audio); break;
       case 'combat_parry': this._updateCombatParry(dt, input, audio); break;
+      case 'combat_parried': this._updateCombatParried(dt, input, level, audio); break;
       case 'combat_hit': this._updateCombatHit(dt, level, audio); break;
       case 'sheathe': this._updateSheathe(dt); break;
     }
@@ -520,7 +544,7 @@ export class Player {
         audio.play('poison');
         level.spawnParticles(this.roomId, it.x, it.y - 8, 10, '#4ea0ff', 50, 0.45, 2);
         this.onEvent?.('pickupPoison', it);
-        this.takeDamage(1, 'POISONED BY TAINTED ELIXIR');
+        this.takeDamage(1, 'poison');
       }
     }
 
@@ -753,7 +777,7 @@ export class Player {
         sp.triggered = true;
       }
       audio.play('hurt');
-      this.die('IMPALED ON SPIKES');
+      this.die('spikes');
     }
   }
 
@@ -844,7 +868,9 @@ export class Player {
     }
     this.facing = dir;
     if (mode === 'run') {
-      this._startHorizJump(RUN_JUMP.dist, RUN_JUMP.dur, RUN_JUMP.arc, 'run_jump', audio);
+      const ws = level.getWindState?.(this.roomId, this.currentTime);
+      const jumpSpec = (ws && ws.active && this.facing === ws.dir) ? TAILWIND_RUN_JUMP : RUN_JUMP;
+      this._startHorizJump(jumpSpec.dist, jumpSpec.dur, jumpSpec.arc, 'run_jump', audio);
     } else {
       this._startHorizJump(STAND_JUMP.dist, STAND_JUMP.dur, STAND_JUMP.arc, 'stand_jump', audio);
     }
@@ -1061,7 +1087,7 @@ export class Player {
         }
       }
       if (headRow >= 0 && level.getTile(headRoomId, c, headRow) === 'L') {
-        level.triggerLooseFloor(headRoomId, c, headRow, audio);
+        level.triggerLooseFloor(headRoomId, c, headRow, audio, 0.58);
       }
     }
 
@@ -1259,7 +1285,9 @@ export class Player {
     if (this.coyote > 0 && input.consumeUp()) {
       this.y = this.fallStartY;
       this.vy = 0;
-      this._startHorizJump(RUN_JUMP.dist, RUN_JUMP.dur, RUN_JUMP.arc, 'run_jump', audio);
+      const ws = level.getWindState?.(this.roomId, this.currentTime);
+      const jumpSpec = (ws && ws.active && this.facing === ws.dir) ? TAILWIND_RUN_JUMP : RUN_JUMP;
+      this._startHorizJump(jumpSpec.dist, jumpSpec.dur, jumpSpec.arc, 'run_jump', audio);
       return;
     }
 
@@ -1370,11 +1398,11 @@ export class Player {
           if (floorsFallen >= 2.45) {
             audio.play('hardLand');
             level.spawnParticles(this.roomId, this.x, this.y, 12, '#a89f90', 70, 0.5, 2);
-            this.die('FATAL FALL');
+            this.die('fall');
           } else if (floorsFallen >= 1.45) {
             audio.play('hardLand');
             level.spawnParticles(this.roomId, this.x, this.y, 8, '#a89f90', 55, 0.4, 2);
-            this.takeDamage(1, 'HARD FALL');
+            this.takeDamage(1, 'fall');
             if (this.alive) this.enterState('hard_land', 0.34);
           } else {
             audio.play('land');
@@ -1513,11 +1541,41 @@ export class Player {
   // Fencing Combat States
   // -------------------------------------------------------------------------
 
+  _startCombatStrike(audio, isRiposte = false) {
+    this.strikeId++;
+    this.strikeHitDone = false;
+    this.strikeWhiffed = false;
+    this.strikeIsRiposte = isRiposte;
+    this.emptyParryStreak = 0;
+    if (isRiposte) {
+      this.consecutiveStrikes = 0;
+    } else {
+      this.consecutiveStrikes = Math.min(6, this.consecutiveStrikes + 1);
+      this.strikeChainDecay = 1.5;
+    }
+    audio?.play('strike');
+    // Normal strike: 0.44s (150ms windup, 88ms active, 202ms recovery)
+    // Riposte strike: 0.30s (72ms windup, 84ms active, 144ms recovery)
+    this.enterState('combat_strike', isRiposte ? 0.30 : 0.44);
+  }
+
+  _startCombatParry(audio) {
+    audio?.play('parry');
+    this.parrySuccess = false;
+    this.parryActive = true;
+    this.riposteQueued = false;
+    this.consecutiveStrikes = 0;
+    // Slight recovery penalty if repeatedly spamming empty parries
+    const fatigue = Math.min(0.16, this.emptyParryStreak * 0.055);
+    this.enterState('combat_parry', 0.39 + fatigue);
+  }
+
   _updateCombatIdle(dt, input, level, enemies, audio) {
     this.stateTimer += dt;
     this.anim = 'combat_idle';
     this.animT = (this.stateTimer * 0.9) % 1;
     this.vx = 0;
+    this.parryActive = false;
 
     if (!this._checkGroundSupport(level, audio)) return;
 
@@ -1535,20 +1593,15 @@ export class Player {
       return;
     }
 
-    // Up: Parry!
-    if (input.consumeUp()) {
-      audio.play('parry');
-      this.parrySuccess = false;
-      this.riposteQueued = false;
-      this.enterState('combat_parry', 0.32);
+    // Up: Parry! (respects brief empty-parry recovery gap)
+    if (this.parryCooldown <= 0 && input.consumeUp()) {
+      this._startCombatParry(audio);
       return;
     }
 
-    // Shift: Strike!
+    // Shift: Strike (or fast riposte if within riposteWindow)!
     if (input.consumeShift()) {
-      audio.play('strike');
-      this.strikeHitDone = false;
-      this.enterState('combat_strike', 0.34);
+      this._startCombatStrike(audio, this.riposteWindow > 0);
       return;
     }
 
@@ -1557,6 +1610,9 @@ export class Player {
     if (dir !== 0) {
       const advancing = dir === this.facing;
       if (advancing && foe && Math.abs(foe.x - this.x) < 26) return;
+      if (!advancing) {
+        this.consecutiveStrikes = 0;
+      }
       this.jumpStartX = this.x;
       let targetX = this.x + dir * 15;
       if (advancing && foe) {
@@ -1575,11 +1631,8 @@ export class Player {
     const u = Math.min(1, this.stateTimer / this.stateDur);
     this.animT = u;
     // Allow responsive parry cancel mid-footwork when an enemy swings!
-    if (input.consumeUp()) {
-      audio.play('parry');
-      this.parrySuccess = false;
-      this.riposteQueued = false;
-      this.enterState('combat_parry', 0.32);
+    if (this.parryCooldown <= 0 && input.consumeUp()) {
+      this._startCombatParry(audio);
       return;
     }
     const desiredX = this.jumpStartX + (this.jumpTargetX - this.jumpStartX) * u;
@@ -1587,16 +1640,14 @@ export class Player {
     if (!this._checkGroundSupport(level, audio)) return;
     if (u >= 1) {
       if (input.consumeShift()) {
-        audio.play('strike');
-        this.strikeHitDone = false;
-        this.enterState('combat_strike', 0.34);
+        this._startCombatStrike(audio, this.riposteWindow > 0);
         return;
       }
       this.enterState('combat_idle', 0.2);
     }
   }
 
-  _updateCombatStrike(dt, level, enemies, audio) {
+  _updateCombatStrike(dt, input, level, enemies, audio) {
     this.stateTimer += dt;
     const u = Math.min(1, this.stateTimer / this.stateDur);
     this.anim = 'combat_strike';
@@ -1604,39 +1655,87 @@ export class Player {
 
     if (!this._checkGroundSupport(level, audio)) return;
 
+    const activeStart = this.strikeIsRiposte ? 0.24 : 0.34;
+    const activeEnd = this.strikeIsRiposte ? 0.52 : 0.54;
+    const reach = this.strikeIsRiposte ? 40 : 38;
+
     // Active blade window
-    if (!this.strikeHitDone && u >= 0.28 && u <= 0.62) {
+    if (!this.strikeHitDone && u >= activeStart && u <= activeEnd) {
       const foe = this._findDuelEnemy(level, enemies);
-      if (foe && Math.abs(foe.x - this.x) <= 38 && Math.sign(foe.x - this.x) === this.facing) {
+      if (foe && Math.abs(foe.x - this.x) <= reach && Math.sign(foe.x - this.x) === this.facing) {
         this.strikeHitDone = true;
-        const isRiposte = this.riposteWindow > 0;
+        const isRiposte = this.strikeIsRiposte || this.riposteWindow > 0;
         const res = foe.receivePlayerStrike(this, level, audio, isRiposte);
         if (isRiposte) this.riposteWindow = 0;
         if (res === 'parried') {
           audio.play('clang');
           level.spawnParticles(this.roomId, (this.x + foe.x) * 0.5, this.y - 18, 10, '#fff29c', 85, 0.28, 2);
-          this._moveX(-this.facing * 5, level);
+          this._moveX(-this.facing * 6, level);
+          // Recoil state: cannot mash Shift immediately; can parry a counter-riposte if sharp!
+          this.enterState('combat_parried', 0.25);
+          return;
         } else if (res === 'hit') {
           audio.play('hurt');
           level.spawnParticles(this.roomId, foe.x, foe.y - 16, 8, '#ff4d5a', 70, 0.3, 2);
           // Deepfake linked pain!
           if (foe.type === 'deepfake') {
             this.onEvent?.('deepfakePain', foe);
-            this.takeDamage(1, 'THE DEEPFAKE MIRRORS YOUR WOUND');
+            this.takeDamage(1, 'deepfake');
           }
         }
       }
     }
 
+    // Mark whiff once active frames pass without connecting (punishable recovery!)
+    if (!this.strikeHitDone && u > activeEnd) {
+      this.strikeWhiffed = true;
+    }
+
+    // Early recovery exit on a clean hit so landing blows feels crisp
+    if (this.strikeHitDone && u >= 0.78 && this.alive) {
+      this.enterState('combat_idle', 0.2);
+      return;
+    }
+
+    // Late whiff recovery allows emergency parry right at the tail end
+    if (this.strikeWhiffed && u >= 0.86 && this.parryCooldown <= 0 && input.consumeUp()) {
+      this._startCombatParry(audio);
+      return;
+    }
+
     if (u >= 1 && this.alive) {
+      this.strikeWhiffed = false;
+      this.enterState('combat_idle', 0.2);
+    }
+  }
+
+  _updateCombatParried(dt, input, level, audio) {
+    this.stateTimer += dt;
+    const u = Math.min(1, this.stateTimer / this.stateDur);
+    this.anim = 'combat_parried';
+    this.animT = u;
+    if (!this._checkGroundSupport(level, audio)) return;
+
+    // After initial blade-recoil shock (110ms), a sharp fencer can parry an incoming counter-riposte!
+    if (this.stateTimer >= 0.11 && this.parryCooldown <= 0 && input.consumeUp()) {
+      this._startCombatParry(audio);
+      return;
+    }
+
+    if (u >= 1) {
       this.enterState('combat_idle', 0.2);
     }
   }
 
   _updateCombatParry(dt, input, audio) {
     this.stateTimer += dt;
+    const u = Math.min(1, this.stateTimer / this.stateDur);
     this.anim = 'combat_parry';
-    this.animT = Math.min(1, this.stateTimer / this.stateDur);
+    this.animT = u;
+
+    // Active parry frames cover the first ~265ms (so reacting immediately to any normal/riposte strike always blocks!);
+    // the ~125ms+ tail drops guard (punishable by feints and delayed heavy lunges!).
+    this.parryActive = this.parrySuccess || this.stateTimer <= 0.265;
 
     // Buffer Shift pressed ANY time during parry to fire an immediate crisp riposte!
     if (input.consumeShift()) {
@@ -1644,17 +1743,29 @@ export class Player {
     }
 
     // After a successful clang, fire a queued riposte snappily without waiting out the whole parry clip
-    if (this.riposteQueued && ((this.parrySuccess && this.stateTimer >= 0.08) || this.stateTimer >= this.stateDur)) {
+    if (this.riposteQueued && this.parrySuccess && this.stateTimer >= 0.08) {
       this.riposteQueued = false;
       this.parrySuccess = false;
-      this.strikeHitDone = false;
-      audio?.play('strike');
-      this.enterState('combat_strike', 0.28);
+      this.parryActive = false;
+      this._startCombatStrike(audio, true);
       return;
     }
 
     if (this.stateTimer >= this.stateDur) {
+      const blocked = this.parrySuccess;
+      const queued = this.riposteQueued;
       this.parrySuccess = false;
+      this.parryActive = false;
+      this.riposteQueued = false;
+      if (!blocked) {
+        this.emptyParryStreak = Math.min(4, this.emptyParryStreak + 1);
+        this.emptyParryDecay = 1.6;
+        this.parryCooldown = 0.08 + this.emptyParryStreak * 0.04;
+      }
+      if (queued) {
+        this._startCombatStrike(audio, blocked || this.riposteWindow > 0);
+        return;
+      }
       this.enterState('combat_idle', 0.2);
     }
   }
@@ -1663,6 +1774,7 @@ export class Player {
     this.stateTimer += dt;
     this.anim = 'combat_hit';
     this.animT = Math.min(1, this.stateTimer / this.stateDur);
+    this.parryActive = false;
     this._moveX(this.vx * dt, level);
     this.vx *= Math.pow(level.ice ? 0.14 : 0.05, dt);
     if (!this._checkGroundSupport(level, audio)) return;
@@ -1686,26 +1798,38 @@ export class Player {
     }
   }
 
-  receiveEnemyStrike(enemy, level, audio) {
+  receiveEnemyStrike(enemy, level, audio, opts = null) {
     if (!this.alive) return 'miss';
-    if (this.state === 'combat_parry' && this.facing !== enemy.facing) {
+    if (this.state === 'combat_parry' && this.parryActive && this.facing !== enemy.facing) {
       this.parrySuccess = true;
-      this.riposteWindow = 0.85;
+      this.emptyParryStreak = 0;
+      this.consecutiveStrikes = 0;
+      this.parryCooldown = 0;
+      this.riposteWindow = 0.78;
       audio.play('clang');
       level.spawnParticles(this.roomId, (this.x + enemy.x) * 0.5, this.y - 18, 12, '#fff5a8', 90, 0.3, 2);
+      // Heavy / brawler / boss blows push a blocking defender back slightly (hazard pressure!)
+      const push = opts?.heavy ? 7 : (enemy.archetype === 'brawler' || enemy.archetype === 'boss' ? 4 : 2);
+      const pushDir = enemy.x < this.x ? 1 : -1;
+      this._moveX(pushDir * (level.ice ? push * 1.4 : push), level);
+      this._checkGroundSupport(level, audio);
+      if (this.alive && this.grounded && level.getTile(this.roomId, colOfX(this.x), this.row) === '^') {
+        this._checkRunSpikes(level, audio);
+      }
       return 'parried';
     }
     // Unarmed or sheathed hero dies in one hit!
     if (!this.swordDrawn) {
       audio.play('hurt');
       level.spawnParticles(this.roomId, this.x, this.y - 16, 12, '#ff3344', 80, 0.4, 2);
-      this.die('STRUCK DOWN UNARMED');
+      this.die('unarmed');
       return 'hit';
     }
     const knockDir = enemy.x < this.x ? 1 : -1;
+    const dmg = opts?.damage ?? 1;
     audio.play('hurt');
-    level.spawnParticles(this.roomId, this.x, this.y - 16, 8, '#ff4d5a', 70, 0.32, 2);
-    this.takeDamage(1, `DEFEATED BY ${enemy.name?.toUpperCase() || 'GUARD'}`, knockDir);
+    level.spawnParticles(this.roomId, this.x, this.y - 16, dmg > 1 ? 14 : 8, dmg > 1 ? '#ff9442' : '#ff4d5a', dmg > 1 ? 95 : 70, 0.36, 2);
+    this.takeDamage(dmg, `DEFEATED BY ${enemy.name?.toUpperCase() || 'GUARD'}`, knockDir);
     return 'hit';
   }
 
@@ -1718,6 +1842,33 @@ export class Player {
     if (!room) return;
     const col = colOfX(this.x);
 
+    // 0. Periodic Alpine Foehn Wind Gusts (Eigerwand / Sphinx)
+    // Holding Shift (brace / careful-step) or Down (crouch) anchors firmly against gusts.
+    const wind = level.getWindState?.(this.roomId, time);
+    if (this.grounded && wind && wind.active && level.isColInWind(this.roomId, col)) {
+      const braced = this._bracingShift || this.state === 'crouch' || this.state === 'careful' ||
+        this.state === 'pickup' || this.state === 'climb_up' || this.state === 'climb_down';
+      if (!braced) {
+        let pushSpeed = 0;
+        if (this.state === 'idle' || this.state === 'land' || this.state === 'hard_land' || this.state === 'turn') {
+          pushSpeed = 44;
+        } else if (this.state === 'combat_idle') {
+          pushSpeed = 24;
+        } else if (this.state === 'run' || this.state === 'run_start' || this.state === 'skid') {
+          pushSpeed = this.facing === wind.dir ? 16 : 28;
+        }
+        if (pushSpeed > 0) {
+          this._moveX(wind.dir * pushSpeed * wind.strength * dt, level);
+          this._checkGroundSupport(level, audio);
+          if (!this.alive) return;
+          if (this.grounded && level.getTile(this.roomId, colOfX(this.x), this.row) === '^') {
+            this._checkRunSpikes(level, audio);
+            return;
+          }
+        }
+      }
+    }
+
     // 1. Slicer / Beam Shutter check
     const slicerRow = this.grounded ? this.row : Math.max(0, Math.min(ROWS - 1, Math.floor((this.y - 12) / TILE_H)));
     if (level.getTile(this.roomId, col, slicerRow) === 'C') {
@@ -1725,7 +1876,7 @@ export class Player {
       if (st.closed && Math.abs(this.x - tileCenterX(col)) < 8) {
         audio.play('slicer');
         level.spawnParticles(this.roomId, this.x, this.y - 16, 14, '#ff4466', 90, 0.4, 2);
-        this.die('BISECTED BY BEAM SHUTTER');
+        this.die('slicer');
         return;
       }
     }
