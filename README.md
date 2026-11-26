@@ -2,6 +2,13 @@
 
 A 2D cinematic platformer in the deliberate, tile-committed tradition of the classic rotoscoped dungeon platformers. Original art, levels, names and text; everything is drawn procedurally on a canvas (no image assets, no dependencies, no build step).
 
+## Play
+
+Two engines were built from the same design and both are playable online:
+
+- Engine A (this branch, `main`): https://koto.github.io/princeofzurich/sonnet/
+- Engine B (branch `ag-engine`): https://koto.github.io/princeofzurich/neon/
+
 ## Story
 
 Present day. While the Federal Council is away at the Davos summit, Dr. Viktor Zins, chairman of the private bank Zins & Cie, quietly triggers "Operation Sechseläuten": at the stroke of midnight his system will merge every Swiss bank account into one ledger that he alone controls. The only person who can stop it is Céline Amrein, the bank's chief auditor, who holds the second cryptographic key. Zins has locked her in the observatory atop the Jungfraujoch and given her one hour to countersign.
