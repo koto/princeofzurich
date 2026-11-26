@@ -217,6 +217,14 @@
         font-size: 10px;
       }
     }
+    #fs-btn {
+      position: fixed; top: calc(6px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+      z-index: 1000; padding: 6px 10px; font: 11px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .08em;
+      color: #e8e2cf; background: rgba(13, 21, 18, .55); border: 1px solid rgba(232, 226, 207, .45); border-radius: 4px;
+      opacity: .55; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none;
+    }
+    #fs-btn:hover, #fs-btn:focus-visible { opacity: 1; }
+    #fs-btn[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -242,6 +250,31 @@
       <button type="button" id="touch-action" class="tbtn action" data-key="ShiftLeft" aria-label="Action / Shift">SHIFT<span>ACT</span></button>
     </div>
   </div>
+
+  <button type="button" id="fs-btn" aria-label="Toggle fullscreen" title="Fullscreen (F)" hidden>FULLSCREEN</button>
+  <script>
+    (function () {
+      var el = document.documentElement, btn = document.getElementById('fs-btn');
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (!req || !exit) return; // e.g. iPhone Safari: no element fullscreen, keep the button hidden
+      btn.hidden = false;
+      function active() { return document.fullscreenElement || document.webkitFullscreenElement; }
+      function toggle() {
+        try {
+          var p = active() ? exit.call(document) : req.call(el, { navigationUI: 'hide' });
+          if (p && p.catch) p.catch(function () {});
+        } catch (e) {}
+      }
+      function sync() { btn.textContent = active() ? 'EXIT FULLSCREEN' : 'FULLSCREEN'; }
+      btn.addEventListener('click', function () { toggle(); btn.blur(); });
+      window.addEventListener('keydown', function (ev) {
+        if (ev.code === 'KeyF' && !ev.repeat && !ev.ctrlKey && !ev.metaKey && !ev.altKey) toggle();
+      });
+      document.addEventListener('fullscreenchange', sync);
+      document.addEventListener('webkitfullscreenchange', sync);
+    })();
+  </script>
 
   <script type="module" src="./src/main.js"></script>
 </body>
