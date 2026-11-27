@@ -1,162 +1,620 @@
-// Level runtime: tile grid, gates, plates, loose floors, debris, slicers, items.
-export const COLS = 12, ROWS = 4, TW = 32, TH = 50, FEET = 44, W = 384, H = 216, HANG_Y = 40;
-export const fy = (r) => r * TH + FEET;
+// src/level.js
+// Constants, tile helpers, and live runtime room/level state (gates, plates, loose floors, slicers, items).
 
-// Tile chars (~ = bottomless void below the map): . empty  _ floor  # wall  L loose  ^ spikes  S slicer  D exit door  M mirror
-// 1-9 gate (closed by default)  a-z pressure plate
-export const isPlateCh = (ch) => ch >= 'a' && ch <= 'z' && ch.length === 1;
-export const isGateCh = (ch) => ch >= '1' && ch <= '9';
-export const supportsCh = (ch) => ch === '_' || ch === 'L' || ch === '^' || ch === 'S' || ch === 'D' || ch === 'M' || isPlateCh(ch) || isGateCh(ch);
-export const ceilingCh = (ch) => supportsCh(ch) || ch === '#';
+export const VIEW_W = 384;
+export const VIEW_H = 216;
+export const HUD_H = 24;
+export const PLAY_H = VIEW_H - HUD_H; // 192
+export const COLS = 12;
+export const ROWS = 4;
+export const TILE_W = 32; // 12 * 32 = 384
+export const TILE_H = 48; // 4 * 48 = 192
+export const FLOOR_THICK = 6;
 
-export function slicerOpen(t, c) {
-  const p = (t + c * 37) % 110;
-  if (p < 40) return 1;
-  if (p < 55) return 1 - (p - 40) / 15;
-  if (p < 62) return 0;
-  if (p < 80) return (p - 62) / 18;
-  return 1;
+export function floorY(row) {
+  return (row + 1) * TILE_H - FLOOR_THICK;
 }
 
-export class Level {
-  constructor(def, idx) {
-    this.def = def; this.idx = idx; this.t = 0;
-    this.rooms = {};
-    this.gates = {};
-    this.items = [];
-    this.debris = [];
-    this.rubble = [];
-    this.loose = new Map();
-    this.down = new Set();
-    this.events = [];
-    this.doorUnlocked = false; this.doorOpen = 0; this.door = null;
-    this.mirror = null;
-    if (def.layout) def.layout.forEach((row, i) => row.forEach((id, j) => {
-      if (!id) return; const rd = def.rooms[id];
-      rd.l = (row[j - 1]) || null; rd.r = (row[j + 1]) || null;
-      rd.u = (def.layout[i - 1] && def.layout[i - 1][j]) || null; rd.d = (def.layout[i + 1] && def.layout[i + 1][j]) || null;
-    }));
-    for (const [id, rd] of Object.entries(def.rooms)) {
-      const rm = { id, t: rd.t.map((s) => s.split('')), l: rd.l || null, r: rd.r || null, u: rd.u || null, d: rd.d || null, rd };
-      this.rooms[id] = rm;
-      for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-        const ch = rm.t[r][c];
-        if (isGateCh(ch)) { (this.gates[ch] = this.gates[ch] || { id: ch, open: 0, timer: 0, lock: 0, cells: [] }).cells.push({ room: id, c, r }); }
-        if (ch === 'D') this.door = { room: id, c, r };
-        if (ch === 'M') this.mirror = { room: id, c, r };
-      }
-      for (const it of rd.i || []) this.items.push({ room: id, c: it.c, r: it.r, t: it.t, taken: false });
-    }
+export function tileCenterX(col) {
+  return col * TILE_W + TILE_W * 0.5;
+}
+
+export function colOfX(x) {
+  return Math.floor(x / TILE_W);
+}
+
+export function rowOfY(y) {
+  // Given feet y, return the row whose floor is at or just below y
+  return Math.floor((y - 1) / TILE_H);
+}
+
+// Tile chars:
+// '#' solid wall
+// '.' empty space
+// '_' solid floor
+// 'L' loose floor
+// '^' spikes
+// 'C' slicer (beam shutter)
+// 'G' gate (floor + vertical portcullis)
+// 'P' open pressure plate
+// 'Q' close pressure plate
+// 'E' level exit door
+// 'M' mirror / CERN detector
+
+export function isWalkableBaseTile(ch) {
+  return ch === '_' || ch === 'L' || ch === '^' || ch === 'C' ||
+    ch === 'G' || ch === 'P' || ch === 'Q' || ch === 'E' || ch === 'M';
+}
+
+export class LevelState {
+  constructor(levelDef) {
+    this.def = levelDef;
+    this.id = levelDef.id;
+    this.name = levelDef.name;
+    this.subtitle = levelDef.subtitle || '';
+    this.ice = !!levelDef.ice;
+    this.rooms = new Map();
+    this.gatesById = new Map();
+    this.exitsById = new Map();
+    this.fallingDebris = []; // { roomId, col, x, y, vy, startRow }
+    this.particles = []; // { roomId, x, y, vx, vy, life, maxLife, color, size }
+    this.mirrorBroken = false;
+    this.deepfakeSpawned = false;
+    this.deepfakeMerged = false;
+    this.flags = new Set();
+
+    this._initRooms();
   }
-  tile(rid, c, r) {
-    let R = this.rooms[rid];
-    if (c < 0) { if (!R.l) return '#'; R = this.rooms[R.l]; c += COLS; }
-    else if (c >= COLS) { if (!R.r) return '#'; R = this.rooms[R.r]; c -= COLS; }
-    if (r < 0) { if (!R.u) return '#'; R = this.rooms[R.u]; r += ROWS; }
-    else if (r >= ROWS) { if (!R.d) return '~'; R = this.rooms[R.d]; r -= ROWS; }
-    return R.t[r][c];
-  }
-  setTile(rid, c, r, ch) { this.rooms[rid].t[r][c] = ch; }
-  blocks(ch) { return ch === '#' || (isGateCh(ch) && this.gates[ch].open < 0.85); }
-  supports(ch) { return supportsCh(ch); }
-  itemAt(room, c, r) { return this.items.find((i) => !i.taken && i.room === room && i.c === c && i.r === r); }
-  stepOn(room, c, r) {
-    if (this.tile(room, c, r) !== 'L') return;
-    const k = room + ':' + c + ':' + r;
-    if (!this.loose.has(k)) { this.loose.set(k, 0); this.events.push('shake'); }
-  }
-  press(ch, who) {
-    const p = this.def.plates && this.def.plates[ch];
-    if (!p) return;
-    this.events.push('plate');
-    for (const id of p.opens || []) {
-      const g = this.gates[id];
-      if (g) {
-        const wasClosed = g.open < 0.1 && g.timer <= 0;
-        g.timer = Math.max(g.timer, p.time || 720);
-        if (wasClosed) this.events.push('gate');
-      }
-    }
-    for (const id of p.closes || []) { const g = this.gates[id]; if (g) { g.timer = 0; } }
-    if (p.door && !this.doorUnlocked) { this.doorUnlocked = true; this.events.push('door'); }
-  }
-  update(actors) {
-    this.t++;
-    // loose floors
-    for (const [k, n] of [...this.loose]) {
-      if (n >= 22) {
-        this.loose.delete(k);
-        const [room, c, r] = k.split(':'); const cc = +c, rr = +r;
-        if (this.tile(room, cc, rr) === 'L') {
-          const riders = new Set(actors.filter((a) => !a.dead && a.room === room && Math.abs(a.x - (cc * TW + TW / 2)) < 22 && a.row() === rr));
-          this.setTile(room, cc, rr, '.');
-          this.debris.push({ room, x: cc * TW + TW / 2, y: fy(rr), vy: 0.5, riders });
-          this.events.push('crash0');
-        }
-      } else this.loose.set(k, n + 1);
-    }
-    // debris
-    const pressed = new Set();
-    for (const d of [...this.debris]) {
-      const py = d.y; d.vy = Math.min(5, d.vy + 0.25); d.y += d.vy;
-      let landed = false;
-      const c = Math.floor(d.x / TW);
-      for (let k = Math.floor(py / TH); k <= Math.floor(d.y / TH) && !landed; k++) {
-        if (py < fy(k) && fy(k) <= d.y && this.supports(this.tile(d.room, c, k))) {
-          landed = true; d.y = fy(k);
-          for (const a of actors) if (!a.dead && (!d.riders || !d.riders.has(a)) && a.room === d.room && Math.abs(a.x - d.x) < 12 && Math.abs(a.y - fy(k)) < 24 && a.row() === k) a.hurtBy('debris');
-          const ch = this.tile(d.room, c, k);
-          if (isPlateCh(ch)) pressed.add(d.room + ':' + c + ':' + k + ':' + ch);
-          if (k >= 0 && k < ROWS) this.rubble.push({ room: d.room, c, r: k, x: d.x });
-          this.events.push('crash1');
+
+  _initRooms() {
+    for (const [key, rdef] of Object.entries(this.def.rooms)) {
+      const roomId = Number(key);
+      const grid = rdef.grid.map((rowStr) => rowStr.split(''));
+      const loose = new Map(); // "c,r" -> { state: 'intact'|'shaking'|'fallen', timer }
+      const slicers = new Map(); // "c,r" -> { phase, period }
+      const spikes = new Map(); // "c,r" -> { extended: 0..1, bloody: false }
+      const plates = new Map(); // "c,r" -> { ...plateDef, pressed: false, pressTimer: 0 }
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const ch = grid[r][c];
+          const k = `${c},${r}`;
+          if (ch === 'L') {
+            loose.set(k, { col: c, row: r, state: 'intact', timer: 0 });
+          } else if (ch === 'C') {
+            const slicerPeriod = rdef.slicerPeriod ?? this.def.slicerPeriod ?? 2.2;
+            slicers.set(k, {
+              col: c,
+              row: r,
+              period: slicerPeriod,
+              phase: ((c * 0.55 + r * 0.8 + roomId * 0.4) % slicerPeriod),
+              wasClosed: false,
+            });
+          } else if (ch === '^') {
+            spikes.set(k, { col: c, row: r, extended: 0.25, triggered: false, snapped: false });
+          }
         }
       }
-      if (landed) this.debris.splice(this.debris.indexOf(d), 1);
-      else if (d.y >= H - 16) { const R = this.rooms[d.room]; if (R.d) { d.room = R.d; d.y -= ROWS * TH; } else this.debris.splice(this.debris.indexOf(d), 1); }
-    }
-    // plates (actors standing on them + rubble resting on them)
-    const now = new Set();
-    for (const a of actors) {
-      if (a.dead || !a.onGround()) continue;
-      const c = a.col(), r = a.row(); const ch = this.tile(a.room, c, r);
-      if (isPlateCh(ch)) now.add(a.room + ':' + c + ':' + r + ':' + ch);
-    }
-    for (const rb of this.rubble) {
-      const ch = this.tile(rb.room, rb.c, rb.r);
-      if (isPlateCh(ch)) now.add(rb.room + ':' + rb.c + ':' + rb.r + ':' + ch);
-    }
-    for (const k of pressed) now.add(k);
-    for (const k of now) {
-      const ch = k.split(':')[3];
-      if (!this.down.has(k)) this.press(ch, null);
-      else {
-        const p = this.def.plates && this.def.plates[ch];
-        if (p && p.opens) for (const id of p.opens) { const g = this.gates[id]; if (g && g.lock <= 0) g.timer = Math.max(g.timer, 8); }
+
+      if (rdef.plates) {
+        for (const p of rdef.plates) {
+          plates.set(`${p.col},${p.row}`, {
+            col: p.col,
+            row: p.row,
+            targetId: p.targetId,
+            action: p.action || 'open',
+            hold: !!p.hold,
+            pinnedByDebris: false,
+            pressed: false,
+            pressTimer: 0,
+            wasOccupied: false,
+          });
+        }
       }
-    }
-    this.down = now;
-    // gates
-    const heroRoom = actors[0] && actors[0].room;
-    for (const g of Object.values(this.gates)) {
-      if (g.lock > 0) { g.lock--; g.open = Math.max(0, g.open - 0.08); continue; }
-      if (g.timer > 0) {
-        g.timer--; g.open = Math.min(1, g.open + 0.03);
-        if (g.timer > 0 && g.timer <= 90 && g.timer % 25 === 0 && heroRoom && g.cells.some((q) => q.room === heroRoom)) this.events.push('tick');
-      } else if (g.open > 0) {
-        const occupied = actors.some((a) => !a.dead && g.cells.some((q) => q.room === a.room && q.c === a.col() && q.r === a.row()));
-        if (!occupied) { const was = g.open; g.open = Math.max(0, g.open - 0.025); if (was >= 0.5 && g.open < 0.5) this.events.push('gateclose'); }
+
+      const gates = [];
+      if (rdef.gates) {
+        for (const g of rdef.gates) {
+          const gateObj = {
+            id: g.id,
+            roomId,
+            col: g.col,
+            row: g.row,
+            openAmount: g.initiallyOpen ? 1 : 0, // 0 closed, 1 open
+            targetOpen: g.initiallyOpen ? 1 : 0,
+            stayOpen: !!g.stayOpen,
+            openDuration: g.openDuration ?? 9.0,
+            timer: 0,
+          };
+          gates.push(gateObj);
+          this.gatesById.set(g.id, gateObj);
+        }
       }
-    }
-    // slicer snap audio for hero's current room
-    if (heroRoom && this.rooms[heroRoom]) {
-      const R = this.rooms[heroRoom];
-      let snapped = false;
-      for (let r = 0; r < ROWS && !snapped; r++) for (let c = 0; c < COLS && !snapped; c++) {
-        if (R.t[r][c] === 'S' && (this.t + c * 37) % 110 === 51) snapped = true;
+
+      const exits = [];
+      if (rdef.exits) {
+        for (const ex of rdef.exits) {
+          const exObj = {
+            id: ex.id,
+            roomId,
+            col: ex.col,
+            row: ex.row,
+            openAmount: ex.initiallyOpen ? 1 : 0,
+            isOpen: !!ex.initiallyOpen,
+          };
+          exits.push(exObj);
+          this.exitsById.set(ex.id, exObj);
+        }
       }
-      if (snapped) this.events.push('slicer');
+
+      const items = (rdef.items || []).map((it, idx) => ({
+        id: `${roomId}_item_${idx}`,
+        col: it.col,
+        row: it.row,
+        x: tileCenterX(it.col),
+        y: floorY(it.row),
+        type: it.type,
+        collected: false,
+      }));
+
+      const mirror = rdef.mirror ? {
+        col: rdef.mirror.col,
+        row: rdef.mirror.row,
+        broken: false,
+      } : null;
+
+      const wind = rdef.wind ? {
+        dir: rdef.wind.dir || 1,
+        period: rdef.wind.period ?? 6.0,
+        warnStart: rdef.wind.warnStart ?? 2.0,
+        gustStart: rdef.wind.gustStart ?? 2.8,
+        gustEnd: rdef.wind.gustEnd ?? 5.2,
+        phase: rdef.wind.phase ?? 0,
+        cols: rdef.wind.cols || null,
+        wasActive: false,
+      } : null;
+
+      this.rooms.set(roomId, {
+        id: roomId,
+        seed: rdef.seed ?? (this.id * 100 + roomId),
+        links: {
+          left: rdef.links?.left ?? null,
+          right: rdef.links?.right ?? null,
+          up: rdef.links?.up ?? null,
+          down: rdef.links?.down ?? null,
+        },
+        grid,
+        loose,
+        slicers,
+        spikes,
+        plates,
+        gates,
+        exits,
+        items,
+        mirror,
+        wind,
+        decor: rdef.decor || [],
+        scripts: rdef.scripts || [],
+        hint: rdef.hint || null,
+      });
     }
-    if (this.doorUnlocked) this.doorOpen = Math.min(1, this.doorOpen + 0.02);
   }
-  slicerLethal(c) { return slicerOpen(this.t, c) < 0.3; }
+
+  getRoom(roomId) {
+    return this.rooms.get(roomId) || null;
+  }
+
+  getTile(roomId, col, row) {
+    const room = this.rooms.get(roomId);
+    if (!room) return '#';
+    if (col < 0) {
+      if (room.links.left !== null) {
+        return this.getTile(room.links.left, COLS + col, row);
+      }
+      return '#';
+    }
+    if (col >= COLS) {
+      if (room.links.right !== null) {
+        return this.getTile(room.links.right, col - COLS, row);
+      }
+      return '#';
+    }
+    if (row < 0) {
+      if (room.links.up !== null) {
+        return this.getTile(room.links.up, col, ROWS + row);
+      }
+      return '#';
+    }
+    if (row >= ROWS) {
+      if (room.links.down !== null) {
+        return this.getTile(room.links.down, col, row - ROWS);
+      }
+      return '.';
+    }
+    const ch = room.grid[row][col];
+    if (ch === 'L') {
+      const l = room.loose.get(`${col},${row}`);
+      if (l && l.state === 'fallen') return '.';
+    }
+    return ch;
+  }
+
+  isWall(roomId, col, row) {
+    return this.getTile(roomId, col, row) === '#';
+  }
+
+  hasFloor(roomId, col, row) {
+    const ch = this.getTile(roomId, col, row);
+    return isWalkableBaseTile(ch);
+  }
+
+  getGateAt(roomId, col, row) {
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+    for (const g of room.gates) {
+      if (g.col === col && g.row === row) return g;
+    }
+    return null;
+  }
+
+  isGateBlocking(roomId, col, row) {
+    const g = this.getGateAt(roomId, col, row);
+    return g ? g.openAmount < 0.65 : false;
+  }
+
+  getExitAt(roomId, col, row) {
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+    for (const ex of room.exits) {
+      if (ex.col === col && ex.row === row) return ex;
+    }
+    return null;
+  }
+
+  getWindState(roomId, time) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.wind) {
+      return { hasWind: false, active: false, warning: false, strength: 0, dir: 0, cols: null };
+    }
+    const w = room.wind;
+    const cycle = ((time + w.phase) % w.period + w.period) % w.period;
+    const active = cycle >= w.gustStart && cycle < w.gustEnd;
+    const warning = !active && cycle >= w.warnStart && cycle < w.gustStart;
+    let strength = 0;
+    if (active) {
+      const rampIn = Math.min(1, (cycle - w.gustStart) / 0.25);
+      const rampOut = Math.min(1, (w.gustEnd - cycle) / 0.25);
+      strength = Math.min(rampIn, rampOut);
+    } else if (warning) {
+      strength = 0.25 * ((cycle - w.warnStart) / Math.max(0.1, w.gustStart - w.warnStart));
+    }
+    return { hasWind: true, active, warning, strength, dir: w.dir, cols: w.cols };
+  }
+
+  isColInWind(roomId, col) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.wind) return false;
+    if (!room.wind.cols) return true;
+    return room.wind.cols.includes(col);
+  }
+
+  getSlicerState(roomId, col, row, time) {
+    const room = this.rooms.get(roomId);
+    if (!room) return { closed: false, openness: 1, warning: false };
+    const s = room.slicers.get(`${col},${row}`);
+    if (!s) return { closed: false, openness: 1, warning: false };
+    const cycle = ((time + s.phase) % s.period) / s.period;
+    // 0.00..0.52: open (safe)
+    // 0.52..0.64: warning / closing fast
+    // 0.64..0.82: snapped closed (LETHAL)
+    // 0.82..1.00: reopening (safe)
+    if (cycle < 0.52) return { closed: false, openness: 1, warning: false };
+    if (cycle < 0.64) {
+      const p = (cycle - 0.52) / 0.12;
+      return { closed: p > 0.7, openness: 1 - p, warning: true };
+    }
+    if (cycle < 0.82) return { closed: true, openness: 0, warning: false };
+    const p = (cycle - 0.82) / 0.18;
+    return { closed: false, openness: p, warning: false };
+  }
+
+  triggerLooseFloor(roomId, col, row, audio, delay = 0.42) {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const l = room.loose.get(`${col},${row}`);
+    if (l && l.state === 'intact') {
+      l.state = 'shaking';
+      l.timer = delay;
+      audio?.play('looseShake');
+    }
+  }
+
+  triggerPlate(roomId, col, row, audio, onEvent, opts = null) {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const plate = room.plates.get(`${col},${row}`);
+    if (!plate) return;
+    plate.pressed = true;
+    plate.pressTimer = 0.25;
+    if (!plate.wasOccupied) {
+      plate.wasOccupied = true;
+      audio?.play('plate');
+      this._activateTarget(plate.targetId, plate.action, audio, onEvent, opts);
+    }
+  }
+
+  _activateTarget(targetId, action, audio, onEvent, opts = null) {
+    const targets = Array.isArray(targetId) ? targetId : [targetId];
+    for (const tid of targets) {
+      const gate = this.gatesById.get(tid);
+      if (gate) {
+        if (action === 'close') {
+          gate.targetOpen = 0;
+          gate.timer = 0;
+          audio?.play('gateSlam');
+          onEvent?.('gateClosed', { gate, silent: !!opts?.silentBanner });
+        } else {
+          gate.targetOpen = 1;
+          gate.timer = gate.stayOpen ? 0 : gate.openDuration;
+          audio?.play('gate');
+          onEvent?.('gateOpened', gate);
+        }
+      }
+      const exit = this.exitsById.get(tid);
+      if (exit && action !== 'close') {
+        if (!exit.isOpen) {
+          exit.isOpen = true;
+          audio?.play('gate');
+          onEvent?.('exitOpened', exit);
+        }
+      }
+    }
+  }
+
+  spawnParticles(roomId, x, y, count, color, speed = 45, life = 0.4, size = 2) {
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = (0.3 + Math.random() * 0.7) * speed;
+      this.particles.push({
+        roomId,
+        x,
+        y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 20,
+        life,
+        maxLife: life,
+        color,
+        size,
+      });
+    }
+  }
+
+  update(dt, time, entities, audio, onEvent) {
+    // 1. Update loose floors, plates, gates, exits across all rooms
+    for (const room of this.rooms.values()) {
+      // Loose floors
+      for (const l of room.loose.values()) {
+        if (l.state === 'shaking') {
+          l.timer -= dt;
+          if (l.timer <= 0) {
+            l.state = 'fallen';
+            audio?.play('looseBreak');
+            this.fallingDebris.push({
+              roomId: room.id,
+              col: l.col,
+              x: tileCenterX(l.col),
+              y: floorY(l.row),
+              vy: 20,
+              startRow: l.row,
+            });
+            this.spawnParticles(room.id, tileCenterX(l.col), floorY(l.row), 7, '#8f8a7c', 45, 0.45, 2);
+          }
+        }
+      }
+
+      // Plates reset occupation if nobody is standing on them (hold-plates stay depressed when weighted by debris or a resting guard!)
+      for (const plate of room.plates.values()) {
+        let occupied = plate.pinnedByDebris;
+        for (const ent of entities) {
+          if (!ent || ent.roomId !== room.id) continue;
+          // Hold-plates also register a defeated guard's resting body on the pad!
+          if (!ent.alive && !(plate.hold && ent.grounded && !ent.hiddenAfterDeath)) continue;
+          if (ent.grounded && colOfX(ent.x) === plate.col && ent.row === plate.row) {
+            occupied = true;
+            this.triggerPlate(room.id, plate.col, plate.row, audio, onEvent);
+          }
+        }
+        if (plate.pinnedByDebris) {
+          plate.pressed = true;
+          const targets = Array.isArray(plate.targetId) ? plate.targetId : [plate.targetId];
+          for (const tid of targets) {
+            const g = this.gatesById.get(tid);
+            if (g) {
+              g.targetOpen = 1;
+              g.stayOpen = true;
+            }
+            const ex = this.exitsById.get(tid);
+            if (ex && !ex.isOpen) {
+              ex.isOpen = true;
+              onEvent?.('exitOpened', ex);
+            }
+          }
+        }
+        if (!occupied) {
+          if (plate.hold && plate.wasOccupied) {
+            // Release hold-plate -> close its target gate smoothly
+            const targets = Array.isArray(plate.targetId) ? plate.targetId : [plate.targetId];
+            for (const tid of targets) {
+              const g = this.gatesById.get(tid);
+              if (g && !g.stayOpen) {
+                g.targetOpen = 0;
+                g.timer = 0;
+                audio?.play('gate');
+              }
+            }
+          }
+          plate.wasOccupied = false;
+          if (plate.pressTimer > 0) {
+            plate.pressTimer -= dt;
+          } else {
+            plate.pressed = false;
+          }
+        }
+      }
+
+      // Gates
+      for (const g of room.gates) {
+        if (g.targetOpen > 0.5 && !g.stayOpen && g.timer > 0) {
+          const prevSec = Math.ceil(g.timer);
+          g.timer -= dt;
+          const nextSec = Math.ceil(g.timer);
+          if (g.timer > 0 && g.timer <= 3.0 && nextSec < prevSec) {
+            audio?.play('gateTick');
+          }
+          if (g.timer <= 0) {
+            g.targetOpen = 0;
+            audio?.play('gate');
+          }
+        }
+        if (g.openAmount < g.targetOpen) {
+          g.openAmount = Math.min(1, g.openAmount + dt * 2.2);
+        } else if (g.openAmount > g.targetOpen) {
+          g.openAmount = Math.max(0, g.openAmount - dt * 0.65);
+        }
+      }
+
+      // Exits
+      for (const ex of room.exits) {
+        if (ex.isOpen && ex.openAmount < 1) {
+          ex.openAmount = Math.min(1, ex.openAmount + dt * 1.4);
+        }
+      }
+
+      // Rhythmic beam shutter & Foehn wind audio when player is in this room
+      const playerEnt = entities[0];
+      if (playerEnt && playerEnt.roomId === room.id) {
+        for (const s of room.slicers.values()) {
+          const st = this.getSlicerState(room.id, s.col, s.row, time);
+          if (st.closed && !s.wasClosed) {
+            audio?.play('slicer');
+          }
+          s.wasClosed = st.closed;
+        }
+        if (room.wind) {
+          const ws = this.getWindState(room.id, time);
+          if (ws.active && !room.wind.wasActive) {
+            audio?.play('wind');
+          }
+          room.wind.wasActive = ws.active;
+        }
+      }
+
+      // Dynamic proximity spikes: spring up with a metallic click when an entity rushes near,
+      // stay retracted for careful steps, and retract slowly once clear.
+      for (const sp of room.spikes.values()) {
+        let threat = false;
+        const sx = tileCenterX(sp.col);
+        for (const ent of entities) {
+          if (!ent || !ent.alive || ent.roomId !== room.id || ent.row !== sp.row) continue;
+          const dx = Math.abs(ent.x - sx);
+          const fast = ent.state === 'run' || ent.state === 'run_start' || ent.state === 'skid' ||
+            ent.state === 'run_turn' || ent.state === 'fall' || ent.state === 'combat_hit';
+          if (dx < 36 && fast) {
+            threat = true;
+            break;
+          }
+        }
+        if (sp.triggered || threat) {
+          if (!sp.snapped && sp.extended < 0.7 && playerEnt && playerEnt.roomId === room.id) {
+            audio?.play('spike');
+            sp.snapped = true;
+          }
+          sp.extended = Math.min(1.0, sp.extended + dt * 9.0);
+        } else {
+          if (sp.extended > 0.26) {
+            sp.extended = Math.max(0.26, sp.extended - dt * 1.4);
+          }
+          if (sp.extended <= 0.35) sp.snapped = false;
+        }
+      }
+    }
+
+    // 2. Update falling debris (hits entities, triggers plates, breaks loose floors)
+    for (let i = this.fallingDebris.length - 1; i >= 0; i--) {
+      const d = this.fallingDebris[i];
+      d.vy = Math.min(280, d.vy + 460 * dt);
+      const prevY = d.y;
+      d.y += d.vy * dt;
+
+      // Room transition down
+      if (d.y > PLAY_H) {
+        const room = this.rooms.get(d.roomId);
+        if (room && room.links.down !== null) {
+          d.roomId = room.links.down;
+          d.y -= PLAY_H;
+          d.startRow = -1;
+        } else {
+          this.fallingDebris.splice(i, 1);
+          continue;
+        }
+      }
+
+      // Check collision with entities strictly below the tile that broke
+      const fallenEnough = d.startRow < 0 || d.y > floorY(d.startRow) + 22;
+      if (fallenEnough) {
+        for (const ent of entities) {
+          if (!ent || !ent.alive || ent.roomId !== d.roomId) continue;
+          if (Math.abs(ent.x - d.x) < 13 && d.y >= ent.y - 28 && prevY <= ent.y) {
+            ent.takeDamage?.(1, 'debris');
+            this.spawnParticles(d.roomId, d.x, ent.y - 16, 8, '#a09888', 60, 0.4, 2);
+            this.fallingDebris.splice(i, 1);
+            d._removed = true;
+            break;
+          }
+        }
+      }
+      if (d._removed) continue;
+
+      // Check landing on a floor tile
+      for (let r = 0; r < ROWS; r++) {
+        if (r <= d.startRow) continue;
+        const fy = floorY(r);
+        if (prevY < fy && d.y >= fy) {
+          const ch = this.getTile(d.roomId, d.col, r);
+          if (ch === 'L') {
+            this.triggerLooseFloor(d.roomId, d.col, r, audio);
+            this.spawnParticles(d.roomId, d.x, fy, 8, '#9b9586', 55, 0.4, 2);
+            this.fallingDebris.splice(i, 1);
+            break;
+          } else if (isWalkableBaseTile(ch) || ch === '#') {
+            if (ch === 'P' || ch === 'Q') {
+              const targetRoom = this.rooms.get(d.roomId);
+              const targetPlate = targetRoom?.plates.get(`${d.col},${r}`);
+              if (targetPlate && targetPlate.hold) {
+                targetPlate.pinnedByDebris = true;
+              }
+              this.triggerPlate(d.roomId, d.col, r, audio, onEvent);
+            }
+            audio?.play('land');
+            this.spawnParticles(d.roomId, d.x, fy, 10, '#9b9586', 65, 0.45, 2);
+            this.fallingDebris.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    // 3. Update particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.vy += 150 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
+  }
 }

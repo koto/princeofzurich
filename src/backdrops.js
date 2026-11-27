@@ -1308,7 +1308,7 @@ function drawLevel4Dynamic(ctx, w, h, t, meta) {
 // Grossmuenster twin towers, Fraumuenster spire, Lake Zurich, Alps, SBB clock
 // ---------------------------------------------------------------------------
 
-function buildTitleStatic(ctx, w, h) {
+function buildTitleStatic(ctx, w, h, showClock = true) {
   const rng = createRng(0x5a555249); // 'ZURI'
   const meta = {
     stars: [],
@@ -1521,49 +1521,51 @@ function buildTitleStatic(ctx, w, h) {
   }
 
   // Swiss SBB railway station clock bracket & housing (upper-left)
-  const cl = meta.clock;
-  // Dark wrought-iron station overhang bracket
-  ctx.fillStyle = '#090b14';
-  ctx.fillRect(0, cl.y - 3, cl.x - cl.r, 5);
-  ctx.fillRect(cl.x - 2, 0, 4, cl.y - cl.r);
-  ctx.fillStyle = '#1d2236';
-  ctx.fillRect(0, cl.y - 3, cl.x - cl.r, 1);
+  if (showClock) {
+    const cl = meta.clock;
+    // Dark wrought-iron station overhang bracket
+    ctx.fillStyle = '#090b14';
+    ctx.fillRect(0, cl.y - 3, cl.x - cl.r, 5);
+    ctx.fillRect(cl.x - 2, 0, 4, cl.y - cl.r);
+    ctx.fillStyle = '#1d2236';
+    ctx.fillRect(0, cl.y - 3, cl.x - cl.r, 1);
 
-  // Outer metallic casing
-  ctx.fillStyle = '#262b3d';
-  ctx.beginPath();
-  ctx.arc(cl.x, cl.y, cl.r + 2.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Slightly dimmed cream-white glowing SBB dial (kept low-glare for dusk)
-  const dialGrad = ctx.createRadialGradient(cl.x, cl.y, 2, cl.x, cl.y, cl.r);
-  dialGrad.addColorStop(0, '#cfd2d6');
-  dialGrad.addColorStop(0.85, '#aeb4bd');
-  dialGrad.addColorStop(1, '#848b96');
-  ctx.fillStyle = dialGrad;
-  ctx.beginPath();
-  ctx.arc(cl.x, cl.y, cl.r, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Iconic Mondaine / SBB baton hour & minute tick marks
-  for (let m = 0; m < 60; m++) {
-    const ang = (m / 60) * Math.PI * 2 - Math.PI / 2;
-    const isHour = m % 5 === 0;
-    const rOut = cl.r - 1.5;
-    const rIn = isHour ? cl.r - Math.max(4, cl.r * 0.24) : cl.r - Math.max(2, cl.r * 0.11);
-    ctx.strokeStyle = '#14171f';
-    ctx.lineWidth = isHour ? 1.6 : 0.8;
+    // Outer metallic casing
+    ctx.fillStyle = '#262b3d';
     ctx.beginPath();
-    ctx.moveTo(cl.x + Math.cos(ang) * rIn, cl.y + Math.sin(ang) * rIn);
-    ctx.lineTo(cl.x + Math.cos(ang) * rOut, cl.y + Math.sin(ang) * rOut);
-    ctx.stroke();
+    ctx.arc(cl.x, cl.y, cl.r + 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Slightly dimmed cream-white glowing SBB dial (kept low-glare for dusk)
+    const dialGrad = ctx.createRadialGradient(cl.x, cl.y, 2, cl.x, cl.y, cl.r);
+    dialGrad.addColorStop(0, '#cfd2d6');
+    dialGrad.addColorStop(0.85, '#aeb4bd');
+    dialGrad.addColorStop(1, '#848b96');
+    ctx.fillStyle = dialGrad;
+    ctx.beginPath();
+    ctx.arc(cl.x, cl.y, cl.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Iconic Mondaine / SBB baton hour & minute tick marks
+    for (let m = 0; m < 60; m++) {
+      const ang = (m / 60) * Math.PI * 2 - Math.PI / 2;
+      const isHour = m % 5 === 0;
+      const rOut = cl.r - 1.5;
+      const rIn = isHour ? cl.r - Math.max(4, cl.r * 0.24) : cl.r - Math.max(2, cl.r * 0.11);
+      ctx.strokeStyle = '#14171f';
+      ctx.lineWidth = isHour ? 1.6 : 0.8;
+      ctx.beginPath();
+      ctx.moveTo(cl.x + Math.cos(ang) * rIn, cl.y + Math.sin(ang) * rIn);
+      ctx.lineTo(cl.x + Math.cos(ang) * rOut, cl.y + Math.sin(ang) * rOut);
+      ctx.stroke();
+    }
   }
 
   drawVignette(ctx, w, h, 0.36);
   return meta;
 }
 
-function drawTitleDynamic(ctx, w, h, t, meta) {
+function drawTitleDynamic(ctx, w, h, t, meta, showClock = true) {
   // Early evening stars twinkling in upper dusk sky
   for (const s of meta.stars) {
     const tw = 0.5 + 0.5 * Math.sin(t * s.speed + s.phase);
@@ -1589,9 +1591,10 @@ function drawTitleDynamic(ctx, w, h, t, meta) {
   }
 
   // Animated Swiss SBB station clock hands!
-  // Dusk time around 19:42 + real-time progression, with authentic SBB 58.5s sweep + 1.5s pause at 12
+  // 23:00 CET + real-time progression, with authentic SBB 58.5s sweep + 1.5s pause at 12
+  if (!showClock) return;
   const cl = meta.clock;
-  const baseSeconds = 19 * 3600 + 42 * 60 + t;
+  const baseSeconds = 23 * 3600 + 0 * 60 + t;
   const secInMin = ((baseSeconds % 60) + 60) % 60;
   // Authentic SBB railway clock sweeps 360 deg in 58.5 seconds and pauses 1.5s at 12 o'clock
   const sbbSecFrac = secInMin < 58.5 ? secInMin / 58.5 : 0;
@@ -1648,21 +1651,819 @@ function drawTitleDynamic(ctx, w, h, t, meta) {
 }
 
 // ---------------------------------------------------------------------------
+// Level 1 (index 1): Olten SBB Gleis 0 (Solothurn)
+// Brushed SBB transit concrete, cobalt signage, split-flap boards, sodium lamps
+// ---------------------------------------------------------------------------
+
+function buildOltenStatic(ctx, w, h, seed) {
+  const rng = createRng(seed);
+  const meta = {
+    lamps: [],
+    signals: [],
+    boardX: Math.floor(rngRange(rng, 44, w - 124)),
+    boardY: 36,
+    clockX: Math.floor(rngRange(rng, w * 0.25, w * 0.75)),
+    clockY: 42,
+    freightPhase: rngRange(rng, 0, 12),
+  };
+
+  for (let i = 0; i < 4; i++) {
+    meta.lamps.push({
+      x: Math.floor(((i + 0.5) / 4) * w + rngRange(rng, -10, 10)),
+      y: 22,
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+  for (let i = 0; i < 2; i++) {
+    meta.signals.push({
+      x: i === 0 ? 22 : w - 24,
+      y: Math.floor(rngRange(rng, 58, 92)),
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+
+  if (!ctx) return meta;
+
+  // Deep SBB transit slate concrete
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0a0d11');
+  bg.addColorStop(0.5, '#151a20');
+  bg.addColorStop(1, '#0c0f13');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Overhead steel railway truss beams
+  ctx.fillStyle = '#1d242b';
+  ctx.fillRect(0, 0, w, 20);
+  ctx.fillStyle = '#2d3640';
+  ctx.fillRect(0, 19, w, 2);
+  for (let gx = 0; gx < w; gx += 28) {
+    ctx.strokeStyle = '#242c34';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(gx, 2);
+    ctx.lineTo(gx + 14, 18);
+    ctx.lineTo(gx + 28, 2);
+    ctx.stroke();
+  }
+
+  // Brushed concrete station wall columns & SBB cobalt fascia stripe
+  for (let x = 0; x < w; x += 48) {
+    ctx.fillStyle = '#181e24';
+    ctx.fillRect(x + 2, 22, 44, h - 48);
+    ctx.fillStyle = '#242b33';
+    ctx.fillRect(x, 22, 4, h - 48);
+  }
+  // Iconic SBB cobalt blue platform band
+  ctx.fillStyle = '#132e54';
+  ctx.fillRect(0, 26, w, 8);
+  ctx.fillStyle = '#1e467a';
+  ctx.fillRect(0, 27, w, 5);
+  ctx.fillStyle = '#c8d4e3';
+  ctx.fillRect(14, 29, 26, 1);
+  ctx.fillRect(w - 42, 29, 24, 1);
+
+  // Recessed nocturnal track tunnel arch behind platform
+  const archY = Math.floor(h * 0.62);
+  ctx.fillStyle = '#090c10';
+  ctx.fillRect(0, archY, w, h - archY - 18);
+  // Rails & sleepers silhouette
+  ctx.fillStyle = '#272f38';
+  ctx.fillRect(0, h - 24, w, 2);
+  ctx.fillRect(0, h - 20, w, 1);
+  for (let sx = 6; sx < w; sx += 16) {
+    ctx.fillStyle = '#171c22';
+    ctx.fillRect(sx, h - 22, 8, 3);
+  }
+
+  // Split-flap SBB departure board
+  const bx = meta.boardX;
+  const by = meta.boardY;
+  ctx.fillStyle = '#0b1018';
+  ctx.fillRect(bx, by, 76, 36);
+  ctx.strokeStyle = '#1e467a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx + 0.5, by + 0.5, 75, 35);
+  ctx.fillStyle = '#1e467a';
+  ctx.fillRect(bx + 1, by + 1, 74, 7);
+  for (let row = 0; row < 4; row++) {
+    ctx.fillStyle = '#141c27';
+    ctx.fillRect(bx + 3, by + 10 + row * 6, 70, 4);
+  }
+
+  // Suspended white-faced SBB clock housing (offset from board)
+  const cx = Math.abs(meta.clockX - (bx + 38)) < 54 ? (bx > w / 2 ? 56 : w - 56) : meta.clockX;
+  meta.clockX = cx;
+  ctx.fillStyle = '#2b323b';
+  ctx.fillRect(cx - 1, 20, 2, meta.clockY - 20);
+  ctx.fillStyle = '#404852';
+  ctx.beginPath();
+  ctx.arc(cx, meta.clockY, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#d8dce0';
+  ctx.beginPath();
+  ctx.arc(cx, meta.clockY, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Static hands at ~23:06
+  ctx.strokeStyle = '#161a20';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(cx, meta.clockY);
+  ctx.lineTo(cx - 2.5, meta.clockY - 3.5);
+  ctx.moveTo(cx, meta.clockY);
+  ctx.lineTo(cx + 3.2, meta.clockY - 4.8);
+  ctx.stroke();
+
+  // Sodium work-lamp hoods
+  for (const l of meta.lamps) {
+    ctx.fillStyle = '#313840';
+    ctx.fillRect(l.x - 6, l.y - 3, 12, 3);
+    ctx.fillStyle = '#c48d32';
+    ctx.fillRect(l.x - 4, l.y, 8, 2);
+  }
+
+  // Signal masts
+  for (const s of meta.signals) {
+    ctx.fillStyle = '#1f252c';
+    ctx.fillRect(s.x - 3, s.y - 8, 6, 18);
+    ctx.fillStyle = '#12161c';
+    ctx.fillRect(s.x - 2, s.y - 6, 4, 14);
+  }
+
+  drawVignette(ctx, w, h, 0.44);
+  return meta;
+}
+
+function drawOltenDynamic(ctx, w, h, t, meta) {
+  // Warm ochre sodium lamp cones
+  for (const l of meta.lamps) {
+    const hum = 0.88 + 0.08 * Math.sin(t * 3.1 + l.phase);
+    const g = ctx.createRadialGradient(l.x, l.y + 3, 2, l.x, l.y + 24, 58);
+    g.addColorStop(0, `rgba(212, 154, 56, ${(0.16 * hum).toFixed(3)})`);
+    g.addColorStop(0.5, `rgba(170, 114, 38, ${(0.06 * hum).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(170, 114, 38, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(l.x - 58, l.y, 116, 86);
+  }
+
+  // Flickering split-flap departure text bars
+  for (let row = 0; row < 4; row++) {
+    const flip = Math.sin(t * 2.2 + row * 1.9) > 0.86;
+    ctx.fillStyle = flip ? 'rgba(240, 210, 120, 0.52)' : 'rgba(212, 154, 56, 0.34)';
+    const barW = 24 + ((row * 17) % 30);
+    ctx.fillRect(meta.boardX + 5, meta.boardY + 11 + row * 6, barW, 2);
+    ctx.fillStyle = 'rgba(200, 216, 232, 0.36)';
+    ctx.fillRect(meta.boardX + 56, meta.boardY + 11 + row * 6, 12, 2);
+  }
+
+  // Animated red SBB lollipop second hand on background clock
+  const sec = (t % 60);
+  const sbbFrac = sec < 58.5 ? sec / 58.5 : 0;
+  const ang = sbbFrac * Math.PI * 2 - Math.PI / 2;
+  ctx.strokeStyle = '#c9242b';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(meta.clockX, meta.clockY);
+  ctx.lineTo(meta.clockX + Math.cos(ang) * 5.8, meta.clockY + Math.sin(ang) * 5.8);
+  ctx.stroke();
+
+  // Pulsing red lockdown signal lamps
+  for (const s of meta.signals) {
+    const pulse = 0.55 + 0.45 * Math.sin(t * 3.4 + s.phase);
+    ctx.fillStyle = `rgba(210, 38, 46, ${(0.8 * pulse).toFixed(3)})`;
+    ctx.fillRect(s.x - 1, s.y - 4, 2, 2);
+    const rg = ctx.createRadialGradient(s.x, s.y - 3, 1, s.x, s.y - 3, 16);
+    rg.addColorStop(0, `rgba(210, 38, 46, ${(0.22 * pulse).toFixed(3)})`);
+    rg.addColorStop(1, 'rgba(210, 38, 46, 0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(s.x - 16, s.y - 19, 32, 32);
+  }
+
+  // Distant passing subterranean freight headlight sweep
+  const cycle = ((t + meta.freightPhase) % 14);
+  if (cycle < 3.2) {
+    const fx = (cycle / 3.2) * (w + 120) - 60;
+    const fg = ctx.createRadialGradient(fx, h - 34, 4, fx, h - 34, 52);
+    fg.addColorStop(0, 'rgba(235, 212, 150, 0.14)');
+    fg.addColorStop(1, 'rgba(235, 212, 150, 0)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(fx - 52, h - 86, 104, 72);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Level 4 (index 3): Grande Dixence Dam Galleries (Valais)
+// Brutalist monolithic concrete, hydro-teal penstock sumps, mineral streaks
+// ---------------------------------------------------------------------------
+
+function buildDixenceStatic(ctx, w, h, seed) {
+  const rng = createRng(seed);
+  const meta = {
+    tubes: [],
+    drips: [],
+    ripples: [],
+  };
+
+  for (let i = 0; i < 3; i++) {
+    meta.tubes.push({
+      x: Math.floor(((i + 0.5) / 3) * w + rngRange(rng, -14, 14)),
+      y: 18,
+      phase: rngRange(rng, 0, 12),
+    });
+  }
+  for (let i = 0; i < 7; i++) {
+    meta.drips.push({
+      x: Math.floor(rngRange(rng, 18, w - 18)),
+      topY: rngInt(rng, 22, 54),
+      bottomY: h - 22,
+      period: rngRange(rng, 1.8, 4.4),
+      phase: rngRange(rng, 0, 4.4),
+    });
+  }
+  for (let i = 0; i < 12; i++) {
+    meta.ripples.push({
+      x: rngRange(rng, 10, w - 30),
+      y: rngRange(rng, h - 24, h - 4),
+      len: rngRange(rng, 10, 26),
+      phase: rngRange(rng, 0, Math.PI * 2),
+      speed: rngRange(rng, 1.0, 2.2),
+    });
+  }
+
+  if (!ctx) return meta;
+
+  // Cool damp brutalist concrete gradient
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0a1014');
+  bg.addColorStop(0.55, '#131d24');
+  bg.addColorStop(1, '#0b1c24');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Monumental angled concrete buttress ribs (285m gravity dam interior)
+  for (let rx = 10; rx < w; rx += 54) {
+    ctx.fillStyle = '#19242d';
+    ctx.fillRect(rx, 0, 18, h - 26);
+    ctx.fillStyle = '#24333f';
+    ctx.fillRect(rx, 0, 2, h - 26);
+    ctx.fillStyle = '#0d141a';
+    ctx.fillRect(rx + 18, 0, 3, h - 26);
+
+    // Formwork horizontal lift seams
+    ctx.fillStyle = 'rgba(8, 12, 16, 0.35)';
+    for (let sy = 20; sy < h - 26; sy += 24) {
+      ctx.fillRect(rx, sy, 18, 1);
+    }
+  }
+
+  // Huge riveted steel penstock conduit pipe spanning background
+  const pipeY = Math.floor(h * 0.46);
+  ctx.fillStyle = '#142630';
+  ctx.fillRect(0, pipeY - 12, w, 24);
+  ctx.fillStyle = '#1e3c4a';
+  ctx.fillRect(0, pipeY - 10, w, 4);
+  ctx.fillStyle = '#0b161d';
+  ctx.fillRect(0, pipeY + 8, w, 4);
+  for (let fx = 28; fx < w; fx += 64) {
+    ctx.fillStyle = '#253f4d';
+    ctx.fillRect(fx, pipeY - 14, 5, 28);
+    ctx.fillStyle = '#3c687c';
+    ctx.fillRect(fx + 1, pipeY - 12, 1, 24);
+  }
+
+  // Weeping mineral calcite streaks down concrete
+  for (let i = 0; i < 14; i++) {
+    const sx = Math.floor(rngRange(rng, 8, w - 8));
+    const sy = rngInt(rng, 18, 60);
+    const sh = rngInt(rng, 32, 90);
+    ctx.fillStyle = 'rgba(130, 164, 176, 0.08)';
+    ctx.fillRect(sx, sy, rngInt(rng, 1, 3), sh);
+  }
+
+  // Stenciled elevation gauge strip (2140M / 2210M aesthetic)
+  const gx = Math.floor(rngRange(rng, 34, w - 58));
+  ctx.fillStyle = 'rgba(32, 74, 88, 0.48)';
+  ctx.fillRect(gx, 36, 18, 56);
+  ctx.fillStyle = 'rgba(120, 198, 214, 0.32)';
+  for (let gy = 40; gy < 88; gy += 8) {
+    ctx.fillRect(gx + 2, gy, gy % 16 === 0 ? 12 : 6, 1);
+  }
+
+  // Deep hydro-teal sump water along bottom
+  const sumpG = ctx.createLinearGradient(0, h - 28, 0, h);
+  sumpG.addColorStop(0, '#0f303c');
+  sumpG.addColorStop(1, '#081b22');
+  ctx.fillStyle = sumpG;
+  ctx.fillRect(0, h - 26, w, 26);
+  ctx.fillStyle = '#286e80';
+  ctx.fillRect(0, h - 26, w, 1);
+
+  // Cool fluorescent fixtures
+  for (const tb of meta.tubes) {
+    ctx.fillStyle = '#26343e';
+    ctx.fillRect(tb.x - 14, tb.y - 3, 28, 3);
+    ctx.fillStyle = '#5c9eb0';
+    ctx.fillRect(tb.x - 11, tb.y, 22, 2);
+  }
+
+  drawVignette(ctx, w, h, 0.42);
+  return meta;
+}
+
+function drawDixenceDynamic(ctx, w, h, t, meta) {
+  // Cool hydro-fluorescent light cones
+  for (const tb of meta.tubes) {
+    const buzz = 0.88 + 0.07 * Math.sin(t * 2.8 + tb.phase);
+    const g = ctx.createRadialGradient(tb.x, tb.y + 4, 3, tb.x, tb.y + 30, 68);
+    g.addColorStop(0, `rgba(110, 206, 224, ${(0.14 * buzz).toFixed(3)})`);
+    g.addColorStop(0.5, `rgba(48, 130, 152, ${(0.06 * buzz).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(48, 130, 152, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(tb.x - 68, tb.y, 136, 98);
+  }
+
+  // Falling seepage droplets into penstock sump
+  for (const d of meta.drips) {
+    const phase = ((t + d.phase) % d.period) / d.period;
+    if (phase < 0.4) {
+      const p = phase / 0.4;
+      const dy = d.topY + p * p * (d.bottomY - d.topY);
+      ctx.fillStyle = 'rgba(130, 218, 232, 0.36)';
+      ctx.fillRect(d.x, Math.floor(dy), 1, 3);
+    } else if (phase < 0.5) {
+      const r = Math.floor(((phase - 0.4) / 0.1) * 5);
+      ctx.fillStyle = 'rgba(110, 210, 226, 0.28)';
+      ctx.fillRect(d.x - r, d.bottomY, 1, 1);
+      ctx.fillRect(d.x + r, d.bottomY, 1, 1);
+    }
+  }
+
+  // Shimmering hydro-teal sump water ripples
+  for (const r of meta.ripples) {
+    const shift = Math.sin(t * r.speed + r.phase) * 4;
+    const a = 0.12 + 0.1 * Math.sin(t * r.speed * 1.3 + r.phase);
+    ctx.fillStyle = `rgba(88, 204, 222, ${a.toFixed(3)})`;
+    ctx.fillRect(Math.floor(r.x + shift), Math.floor(r.y), Math.floor(r.len), 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Level 5 (index 4): Chateau de Chillon Viaduct Vaults (Montreux, Vaud)
+// Savoyard limestone arches fused under 1960s A9 motorway piers + moonlit Lac Leman
+// ---------------------------------------------------------------------------
+
+function buildChillonStatic(ctx, w, h, seed) {
+  const rng = createRng(seed);
+  const meta = {
+    slits: [],
+    sconces: [],
+    motes: [],
+  };
+
+  const archCount = 3;
+  const archW = Math.floor(w / archCount);
+  for (let i = 0; i < archCount; i++) {
+    const cx = i * archW + Math.floor(archW * 0.5);
+    meta.slits.push({
+      x: cx,
+      y: 44,
+      w: 14,
+      h: 64,
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+    meta.sconces.push({
+      x: i * archW + 14,
+      y: 56,
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+  for (let i = 0; i < 14; i++) {
+    meta.motes.push({
+      x: rngRange(rng, 0, w),
+      y: rngRange(rng, 24, h - 20),
+      vx: rngRange(rng, 1.0, 2.8) * (rng() > 0.5 ? 1 : -1),
+      vy: rngRange(rng, -1.2, -0.3),
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+
+  if (!ctx) return meta;
+
+  // Warm medieval limestone bedrock base
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#12100d');
+  bg.addColorStop(0.5, '#1e1a15');
+  bg.addColorStop(1, '#14120f');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // 1960s A9 motorway concrete viaduct slab bolted straight onto the castle ceiling!
+  ctx.fillStyle = '#2a2e32';
+  ctx.fillRect(0, 0, w, 20);
+  ctx.fillStyle = '#3b4147';
+  ctx.fillRect(0, 18, w, 2);
+  // Concrete pier brackets
+  for (let px = 22; px < w; px += 92) {
+    ctx.fillStyle = '#21262b';
+    ctx.fillRect(px, 14, 24, 14);
+    ctx.fillStyle = '#183c42'; // riveted turquoise hydro-bulkhead collar
+    ctx.fillRect(px - 2, 26, 28, 4);
+  }
+
+  // Dressed Savoyard limestone ashlar blocks
+  for (let y = 26; y < h; y += 14) {
+    const off = ((y / 14) % 2) * 14;
+    for (let x = -off; x < w; x += 28) {
+      const shade = rng();
+      ctx.fillStyle = shade > 0.65 ? '#2b251e' : shade > 0.3 ? '#231e18' : '#1b1712';
+      ctx.fillRect(x + 1, y + 1, 26, 12);
+    }
+  }
+
+  // Romanesque gothic stone arches framing tall arrow-slit windows onto Lac Leman
+  for (const slit of meta.slits) {
+    // Vaulted recess
+    ctx.fillStyle = '#16130f';
+    ctx.beginPath();
+    ctx.arc(slit.x, slit.y + 18, 36, Math.PI, 0);
+    ctx.lineTo(slit.x + 36, h - 18);
+    ctx.lineTo(slit.x - 36, h - 18);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = '#3e362c';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(slit.x, slit.y + 18, 36, Math.PI, 0);
+    ctx.stroke();
+
+    // Tall narrow castle window opening onto moonlit Lake Geneva!
+    const wx = slit.x - Math.floor(slit.w / 2);
+    const lakeG = ctx.createLinearGradient(0, slit.y, 0, slit.y + slit.h);
+    lakeG.addColorStop(0, '#0d1b33');
+    lakeG.addColorStop(0.55, '#193257');
+    lakeG.addColorStop(1, '#122640');
+    ctx.fillStyle = lakeG;
+    ctx.fillRect(wx, slit.y, slit.w, slit.h);
+    // Distant Savoy Alps silhouette across the lake
+    ctx.fillStyle = '#0c1526';
+    ctx.fillRect(wx, slit.y + 24, slit.w, 8);
+    // Stone mullion rim
+    ctx.strokeStyle = '#4f4539';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wx - 0.5, slit.y - 0.5, slit.w + 1, slit.h + 1);
+  }
+
+  // Riveted turquoise Romandie fiber-optic trunk & hydro conduit running across stone pillars
+  ctx.fillStyle = '#1d444a';
+  ctx.fillRect(0, h - 38, w, 6);
+  ctx.fillStyle = '#2d6870';
+  ctx.fillRect(0, h - 38, w, 2);
+  for (let bx = 18; bx < w; bx += 42) {
+    ctx.fillStyle = '#3d828c';
+    ctx.fillRect(bx, h - 39, 3, 8);
+  }
+
+  drawVignette(ctx, w, h, 0.44);
+  return meta;
+}
+
+function drawChillonDynamic(ctx, w, h, t, meta) {
+  // Moonlit silver Lac Leman ripples shimmering inside arrow slits
+  for (const slit of meta.slits) {
+    const wx = slit.x - Math.floor(slit.w / 2) + 2;
+    for (let r = 0; r < 4; r++) {
+      const ry = slit.y + 36 + r * 6;
+      const a = 0.22 + 0.18 * Math.sin(t * 2.4 + slit.phase + r * 1.2);
+      ctx.fillStyle = `rgba(195, 224, 255, ${a.toFixed(3)})`;
+      ctx.fillRect(wx + (r % 2), ry, slit.w - 5, 1);
+    }
+    // Soft moonlight shaft angling onto dungeon floor
+    const mg = ctx.createLinearGradient(slit.x, slit.y + 10, slit.x + 14, slit.y + slit.h + 30);
+    mg.addColorStop(0, 'rgba(140, 185, 235, 0.09)');
+    mg.addColorStop(1, 'rgba(140, 185, 235, 0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(slit.x - 10, slit.y + 10, 26, slit.h + 24);
+  }
+
+  // Warm medieval sconce flicker
+  for (const s of meta.sconces) {
+    const fl = 0.85 + 0.12 * Math.sin(t * 5.2 + s.phase);
+    const g = ctx.createRadialGradient(s.x, s.y, 1, s.x, s.y, 34 * fl);
+    g.addColorStop(0, `rgba(220, 152, 74, ${(0.15 * fl).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(220, 152, 74, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(s.x - 36, s.y - 36, 72, 72);
+  }
+
+  // Drifting limestone dust motes
+  for (const m of meta.motes) {
+    const mx = ((m.x + t * m.vx) % w + w) % w;
+    const my = ((m.y + t * m.vy) % (h - 24) + (h - 24)) % (h - 24) + 12;
+    ctx.fillStyle = 'rgba(205, 190, 165, 0.16)';
+    ctx.fillRect(Math.floor(mx), Math.floor(my), 1, 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Level 7 (index 6): Bundeshaus Sub-Archives & Federal Mint (Bern)
+// Bernese green-gold sandstone arches, rolling archive racks, brass pneumatic tubes
+// ---------------------------------------------------------------------------
+
+function buildBundeshausStatic(ctx, w, h, seed) {
+  const rng = createRng(seed);
+  const meta = {
+    lamps: [],
+    capsules: [],
+    tubeY: 28,
+  };
+
+  for (let i = 0; i < 4; i++) {
+    meta.lamps.push({
+      x: Math.floor(((i + 0.5) / 4) * w),
+      y: 44,
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+  for (let i = 0; i < 2; i++) {
+    meta.capsules.push({
+      speed: rngRange(rng, 44, 68) * (i % 2 === 0 ? 1 : -1),
+      phase: rngRange(rng, 0, 10),
+    });
+  }
+
+  if (!ctx) return meta;
+
+  // Warm Bernese green-gold sandstone backdrop
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0e110c');
+  bg.addColorStop(0.5, '#191e15');
+  bg.addColorStop(1, '#10140e');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Sandstone Federal Palace basement vaults
+  for (let ax = 0; ax < w; ax += 64) {
+    ctx.fillStyle = '#20261b';
+    ctx.fillRect(ax + 4, 20, 56, h - 40);
+    ctx.fillStyle = '#2d3426';
+    ctx.fillRect(ax, 20, 6, h - 40);
+    ctx.fillStyle = '#3d4634';
+    ctx.fillRect(ax + 1, 20, 1, h - 40);
+  }
+
+  // Towering steel rolling archive shelves packed with cantonal ledger binders
+  for (let rx = 10; rx < w - 10; rx += 64) {
+    ctx.fillStyle = '#121611';
+    ctx.fillRect(rx, 46, 48, h - 70);
+    ctx.strokeStyle = '#384031';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rx + 0.5, 46.5, 47, h - 71);
+    for (let sy = 56; sy < h - 28; sy += 14) {
+      ctx.fillStyle = '#2c3328';
+      ctx.fillRect(rx + 2, sy, 44, 2);
+      // Colored federal binder spines
+      for (let bx = rx + 4; bx < rx + 44; bx += 5) {
+        const pick = rng();
+        ctx.fillStyle = pick > 0.72 ? '#5c2824' : pick > 0.42 ? '#2b4734' : '#4a432c';
+        ctx.fillRect(bx, sy - 10, 3, 9);
+      }
+    }
+  }
+
+  // Gleaming brass pneumatic mail tube running across upper archive
+  ctx.fillStyle = '#5e4b22';
+  ctx.fillRect(0, meta.tubeY, w, 6);
+  ctx.fillStyle = '#9e803c';
+  ctx.fillRect(0, meta.tubeY + 1, w, 2);
+  for (let jx = 32; jx < w; jx += 64) {
+    ctx.fillStyle = '#7d632c';
+    ctx.fillRect(jx, meta.tubeY - 1, 4, 8);
+  }
+
+  // Green-shaded federal accountant lamps
+  for (const l of meta.lamps) {
+    ctx.fillStyle = '#6e5728';
+    ctx.fillRect(l.x - 1, 34, 2, 10);
+    ctx.fillStyle = '#1d5438';
+    ctx.fillRect(l.x - 6, l.y, 12, 4);
+    ctx.fillStyle = '#328258';
+    ctx.fillRect(l.x - 5, l.y, 10, 1);
+  }
+
+  // Red-and-white heraldic Mint baseboard trim
+  ctx.fillStyle = '#151912';
+  ctx.fillRect(0, h - 22, w, 22);
+  ctx.fillStyle = '#6b2424';
+  ctx.fillRect(0, h - 22, w, 2);
+
+  drawVignette(ctx, w, h, 0.44);
+  return meta;
+}
+
+function drawBundeshausDynamic(ctx, w, h, t, meta) {
+  // Green-shaded accountant lamp warm-emerald pools
+  for (const l of meta.lamps) {
+    const fl = 0.9 + 0.08 * Math.sin(t * 2.1 + l.phase);
+    const g = ctx.createRadialGradient(l.x, l.y + 6, 2, l.x, l.y + 22, 46);
+    g.addColorStop(0, `rgba(110, 210, 145, ${(0.14 * fl).toFixed(3)})`);
+    g.addColorStop(0.55, `rgba(195, 175, 95, ${(0.06 * fl).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(110, 210, 145, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(l.x - 46, l.y, 92, 74);
+  }
+
+  // Occasional bright brass pneumatic mail capsules zipping overhead
+  for (const c of meta.capsules) {
+    const span = w + 180;
+    const raw = ((t * c.speed + c.phase * 40) % span + span) % span;
+    const cx = raw - 90;
+    if (cx > -12 && cx < w + 12) {
+      ctx.fillStyle = 'rgba(242, 214, 128, 0.65)';
+      ctx.fillRect(Math.floor(cx), meta.tubeY + 1, 10, 3);
+      ctx.fillStyle = 'rgba(255, 245, 200, 0.45)';
+      ctx.fillRect(Math.floor(cx + 2), meta.tubeY + 2, 6, 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Level 8 (index 7): Eigerwand North-Face Gallery (Jungfraubahn, 2,865m)
+// Jagged black-slate alpine rock, iron rack rails, panoramic blizzard cliff windows
+// ---------------------------------------------------------------------------
+
+function buildEigerwandStatic(ctx, w, h, seed) {
+  const rng = createRng(seed);
+  const meta = {
+    windows: [],
+    snow: [],
+    stars: [],
+    valleyLights: [],
+  };
+
+  // Two large carved North Face panoramic cliff windows
+  meta.windows.push({ x: 34, y: 24, w: 122, h: 96 });
+  meta.windows.push({ x: 214, y: 24, w: 132, h: 96 });
+
+  for (let i = 0; i < 36; i++) {
+    meta.snow.push({
+      x: rngRange(rng, 0, w),
+      y: rngRange(rng, 18, h - 18),
+      vx: rngRange(rng, 45, 95),
+      vy: rngRange(rng, 8, 22),
+      len: rngInt(rng, 3, 7),
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+  for (let i = 0; i < 24; i++) {
+    meta.stars.push({
+      x: Math.floor(rngRange(rng, 36, w - 36)),
+      y: Math.floor(rngRange(rng, 26, 66)),
+      phase: rngRange(rng, 0, Math.PI * 2),
+    });
+  }
+  for (let i = 0; i < 14; i++) {
+    meta.valleyLights.push({
+      x: Math.floor(rngRange(rng, 42, w - 42)),
+      y: Math.floor(rngRange(rng, 98, 116)),
+      warm: rng() > 0.3,
+    });
+  }
+
+  if (!ctx) return meta;
+
+  // Jagged black-slate Eiger rock interior
+  const bg = ctx.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#0a0d14');
+  bg.addColorStop(0.5, '#141822');
+  bg.addColorStop(1, '#0c0f17');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Rough-hewn rock facets
+  for (let y = 0; y < h; y += 22) {
+    for (let x = 0; x < w; x += 30) {
+      const v = rng();
+      ctx.fillStyle = v > 0.65 ? '#1c212e' : v > 0.3 ? '#151924' : '#0f121b';
+      ctx.fillRect(x, y, 28, 20);
+    }
+  }
+
+  // Huge panoramic North Face cliff windows opening onto 1,800m moonlit drop over Grindelwald
+  for (const win of meta.windows) {
+    const sky = ctx.createLinearGradient(0, win.y, 0, win.y + win.h);
+    sky.addColorStop(0, '#070e1f');
+    sky.addColorStop(0.65, '#11203d');
+    sky.addColorStop(1, '#0a1426');
+    ctx.fillStyle = sky;
+    ctx.fillRect(win.x, win.y, win.w, win.h);
+
+    // Distant moonlit Oberland ridge silhouette
+    ctx.fillStyle = '#0a1220';
+    ctx.beginPath();
+    ctx.moveTo(win.x, win.y + win.h);
+    ctx.lineTo(win.x + 24, win.y + 58);
+    ctx.lineTo(win.x + 56, win.y + 72);
+    ctx.lineTo(win.x + 92, win.y + 50);
+    ctx.lineTo(win.x + win.w, win.y + 68);
+    ctx.lineTo(win.x + win.w, win.y + win.h);
+    ctx.closePath();
+    ctx.fill();
+
+    // Frost-rimmed steel & brass window frame
+    ctx.strokeStyle = '#4e5970';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(win.x, win.y, win.w, win.h);
+    ctx.fillStyle = '#2d3545';
+    ctx.fillRect(win.x + Math.floor(win.w / 2) - 2, win.y, 4, win.h);
+    // Frost rim highlights
+    ctx.fillStyle = 'rgba(200, 232, 255, 0.35)';
+    ctx.fillRect(win.x + 2, win.y + win.h - 3, win.w - 4, 2);
+  }
+
+  // Iron Jungfraubahn cogwheel rack-rail along lower gallery
+  ctx.fillStyle = '#1f2533';
+  ctx.fillRect(0, h - 26, w, 6);
+  ctx.fillStyle = '#3b4459';
+  for (let tx = 4; tx < w; tx += 8) {
+    ctx.fillRect(tx, h - 28, 4, 2);
+  }
+
+  // Frost-rimmed brass Eigerwand station plaque between windows
+  ctx.fillStyle = '#1c2330';
+  ctx.fillRect(166, 46, 38, 16);
+  ctx.strokeStyle = '#9c8346';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(166.5, 46.5, 37, 15);
+  ctx.fillStyle = '#d4c8a6';
+  ctx.fillRect(172, 51, 26, 2);
+  ctx.fillStyle = '#7e90ad';
+  ctx.fillRect(176, 56, 18, 1);
+
+  drawVignette(ctx, w, h, 0.42);
+  return meta;
+}
+
+function drawEigerwandDynamic(ctx, w, h, t, meta) {
+  // Clip starry abyss + distant Grindelwald lights + blowing snow streaks to windows
+  for (const win of meta.windows) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(win.x + 1, win.y + 1, win.w - 2, win.h - 2);
+    ctx.clip();
+
+    // Twinkling stars high over the North Face
+    for (const s of meta.stars) {
+      if (s.x < win.x || s.x > win.x + win.w) continue;
+      const a = 0.25 + 0.35 * Math.sin(t * 2.2 + s.phase);
+      ctx.fillStyle = `rgba(215, 232, 255, ${a.toFixed(3)})`;
+      ctx.fillRect(s.x, s.y, 1, 1);
+    }
+
+    // Distant Grindelwald valley lights 1,800m below
+    for (const vl of meta.valleyLights) {
+      if (vl.x < win.x || vl.x > win.x + win.w) continue;
+      ctx.fillStyle = vl.warm ? 'rgba(240, 198, 118, 0.42)' : 'rgba(170, 206, 245, 0.36)';
+      ctx.fillRect(vl.x, vl.y, 1, 1);
+    }
+
+    // Horizontal blowing blizzard snow streaks
+    for (const sn of meta.snow) {
+      const sx = ((sn.x + t * sn.vx) % (win.w + 20) + (win.w + 20)) % (win.w + 20) + win.x - 10;
+      const sy = ((sn.y + t * sn.vy) % win.h + win.h) % win.h + win.y;
+      ctx.fillStyle = 'rgba(210, 235, 255, 0.35)';
+      ctx.fillRect(Math.floor(sx), Math.floor(sy), sn.len, 1);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 const LEVEL_BUILDERS = [
-  buildLevel0Static,
-  buildLevel1Static,
-  buildLevel2Static,
-  buildLevel3Static,
-  buildLevel4Static,
+  buildLevel0Static,     // 0: Paradeplatz Vaults (Zurich)
+  buildOltenStatic,      // 1: Olten SBB Gleis 0 (Solothurn)
+  buildLevel1Static,     // 2: Gotthard Reduit Fortress (Uri/Ticino)
+  buildDixenceStatic,    // 3: Grande Dixence Dam Galleries (Valais)
+  buildChillonStatic,    // 4: Chateau de Chillon Viaduct Vaults (Vaud)
+  buildLevel2Static,     // 5: CERN Ring Sector 4 (Geneva)
+  buildBundeshausStatic, // 6: Bundeshaus Sub-Archives & Mint (Bern)
+  buildEigerwandStatic,  // 7: Eigerwand North-Face Gallery (Oberland)
+  buildLevel3Static,     // 8: Jungfraujoch Ice Palace (Glacier)
+  buildLevel4Static,     // 9: Sphinx Observatory Summit (3,571m)
 ];
 
 const LEVEL_DYNAMICS = [
   drawLevel0Dynamic,
+  drawOltenDynamic,
   drawLevel1Dynamic,
+  drawDixenceDynamic,
+  drawChillonDynamic,
   drawLevel2Dynamic,
+  drawBundeshausDynamic,
+  drawEigerwandDynamic,
   drawLevel3Dynamic,
   drawLevel4Dynamic,
 ];
@@ -1672,7 +2473,7 @@ const LEVEL_DYNAMICS = [
  * Static layers are cached per (levelIndex, roomSeed, w, h).
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {number} levelIndex - 0..4 (Paradeplatz, Gotthard, CERN, Jungfraujoch, Sphinx)
+ * @param {number} levelIndex - 0..9 across Switzerland
  * @param {number} w - Canvas width (e.g. 384)
  * @param {number} h - Canvas height (e.g. 216)
  * @param {number} t - Elapsed time in seconds
@@ -1680,7 +2481,8 @@ const LEVEL_DYNAMICS = [
  */
 export function drawBackdrop(ctx, levelIndex, w, h, t = 0, roomSeed = 0) {
   if (!ctx || w <= 0 || h <= 0) return;
-  const lvl = ((Math.floor(Number(levelIndex) || 0) % 5) + 5) % 5;
+  const count = LEVEL_BUILDERS.length;
+  const lvl = ((Math.floor(Number(levelIndex) || 0) % count) + count) % count;
   const time = Number.isFinite(t) ? t : 0;
   const seedHash = hashSeed(lvl, roomSeed);
   const cacheKey = `lvl:${lvl}:${seedHash}:${w}x${h}`;
@@ -1708,21 +2510,22 @@ export function drawBackdrop(ctx, levelIndex, w, h, t = 0, roomSeed = 0) {
  * @param {number} h - Canvas height (e.g. 216)
  * @param {number} t - Elapsed time in seconds
  */
-export function drawTitleBackdrop(ctx, w, h, t = 0) {
+export function drawTitleBackdrop(ctx, w, h, t = 0, opts = {}) {
   if (!ctx || w <= 0 || h <= 0) return;
+  const showClock = opts.showClock !== false;
   const time = Number.isFinite(t) ? t : 0;
-  const cacheKey = `title:${w}x${h}`;
+  const cacheKey = `title:${showClock ? 'clk' : 'noclk'}:${w}x${h}`;
 
   const entry = getCachedLayer(cacheKey, w, h, (offCtx, cw, ch) =>
-    buildTitleStatic(offCtx, cw, ch)
+    buildTitleStatic(offCtx, cw, ch, showClock)
   );
 
   ctx.save();
   if (entry.canvas) {
     ctx.drawImage(entry.canvas, 0, 0);
   } else {
-    buildTitleStatic(ctx, w, h);
+    buildTitleStatic(ctx, w, h, showClock);
   }
-  drawTitleDynamic(ctx, w, h, time, entry.meta);
+  drawTitleDynamic(ctx, w, h, time, entry.meta, showClock);
   ctx.restore();
 }
