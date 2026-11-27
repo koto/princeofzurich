@@ -71,4 +71,4 @@ node tools/combat-sim.mjs
 
 ## Play online
 
-This is engine B of two built from the same design: https://koto.github.io/princeofzurich/neon/ (engine A, on `main`: https://koto.github.io/princeofzurich/sonnet/).
+https://koto.github.io/princeofzurich/

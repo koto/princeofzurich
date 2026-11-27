@@ -13,6 +13,13 @@ const BODY_HALF_W = 6;
 const GRAVITY = 460;
 
 // Archetype combat profiles (further scaled by skill 1..5 and boss phase 1..3)
+// Enemy offence is 25% slower than its tuned values: longer strike wind-ups (more time
+// to read and parry) and longer recoveries (bigger punish window).
+// Their defence (parry, hurt and vulnerable windows) is unchanged.
+export const ENEMY_ATTACK_SLOWDOWN = 1.25;
+// Enemies parry and counter-attack 25% less often than their tuned odds.
+export const ENEMY_DEFENCE_SCALE = 0.75;
+
 export const ARCHETYPES = {
   rookie: {
     idealMin: 26,
@@ -399,7 +406,7 @@ export class Enemy {
       return Math.min(0.85, 0.46 + (player.consecutiveStrikes || 0) * 0.16);
     }
     const spam = Math.max(0, (player.consecutiveStrikes || 0) - 1);
-    return Math.min(p.parryCap, p.parryChance + spam * p.spamParryBonus);
+    return Math.min(p.parryCap, p.parryChance + spam * p.spamParryBonus) * ENEMY_DEFENCE_SCALE;
   }
 
   receivePlayerStrike(player, level, audio, isRiposte = false) {
@@ -486,7 +493,7 @@ export class Enemy {
     this.strikeTelegraph = 0;
     this.enterState('combat_parry', 0.26);
     const spamBonus = (player.consecutiveStrikes || 0) >= 2 ? 0.20 : 0;
-    const willRiposte = forceRiposte || Math.random() < Math.min(1, p.riposteChance + spamBonus);
+    const willRiposte = forceRiposte || Math.random() < Math.min(1, p.riposteChance + spamBonus) * ENEMY_DEFENCE_SCALE;
     this.pendingRiposte = willRiposte;
     this.aiCooldown = willRiposte ? 0.08 : Math.max(0.22, p.delay * 0.65);
   }
@@ -524,6 +531,8 @@ export class Enemy {
       audio?.play('telegraph');
     }
 
+    if (this.strikeKind !== 'heavy') windup *= ENEMY_ATTACK_SLOWDOWN; // heavy lunges are already slow by design
+    recovery *= ENEMY_ATTACK_SLOWDOWN;
     const totalDur = windup + active + recovery;
     this.strikeWindupFrac = windup / totalDur;
     this.strikeActiveEndFrac = (windup + active) / totalDur;
