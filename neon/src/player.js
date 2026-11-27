@@ -1567,7 +1567,7 @@ export class Player {
     this.consecutiveStrikes = 0;
     // Slight recovery penalty if repeatedly spamming empty parries
     const fatigue = Math.min(0.16, this.emptyParryStreak * 0.055);
-    this.enterState('combat_parry', 0.39 + fatigue);
+    this.enterState('combat_parry', 0.46 + fatigue);
   }
 
   _updateCombatIdle(dt, input, level, enemies, audio) {
@@ -1733,9 +1733,9 @@ export class Player {
     this.anim = 'combat_parry';
     this.animT = u;
 
-    // Active parry frames cover the first ~265ms (so reacting immediately to any normal/riposte strike always blocks!);
+    // Active parry frames cover the first ~340ms, matched to the enemies' 25% longer wind-ups (so reacting immediately to any normal/riposte strike always blocks!);
     // the ~125ms+ tail drops guard (punishable by feints and delayed heavy lunges!).
-    this.parryActive = this.parrySuccess || this.stateTimer <= 0.265;
+    this.parryActive = this.parrySuccess || this.stateTimer <= 0.34;
 
     // Buffer Shift pressed ANY time during parry to fire an immediate crisp riposte!
     if (input.consumeShift()) {
