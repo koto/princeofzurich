@@ -469,7 +469,7 @@ function fightRoomFoe(s, maxFrames = 2600) {
     `unbracedPush=${unbracedDelta.toFixed(1)}px bracedDelta=${bracedDelta.toFixed(1)}px`);
 
   // 3F: Music track mapping, Story Bible card line/char/ASCII checks, and Level Select UI
-  const expectedTracks = ['level0', 'level1', 'level1', 'level2', 'level2', 'level2', 'level0', 'level4', 'level3', 'level4'];
+  const expectedTracks = ['level0', 'level1', 'level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9'];
   const tracksMatch = expectedTracks.every((t, i) => LEVEL_MUSIC_TRACKS[i] === t);
   const allCards = [...INTRO_CARDS, ...INTERLUDE_CARDS, ...getVictoryCards(1234), ...TIMEOUT_CARDS];
   const badCard = allCards.find((c) =>

@@ -1,5 +1,6 @@
 // src/render.js
-// Procedural renderer: tile themes, traps, items, articulated skeletal figures,
+// Procedural 2x (768x432) renderer for logical 384x216 world:
+// tile materials, oblique 2.5D architecture, traps, items, articulated IK figures,
 // Swiss railway station clock, HUD, title screen, and story cards.
 
 import { drawBackdrop, drawTitleBackdrop } from './backdrops.js';
@@ -8,6 +9,10 @@ import {
   floorY, tileCenterX,
 } from './level.js';
 import { TITLE_TEXT, LEVEL_INTROS, DEATH_SUBLINES } from './story.js';
+import { drawCharacter } from './character.js';
+
+export const RENDER_SCALE = 2;
+export { drawCharacter };
 
 // ---------------------------------------------------------------------------
 // Per-level architectural palettes (10 Swiss locations harmonized with backdrops.js)
@@ -16,6 +21,7 @@ import { TITLE_TEXT, LEVEL_INTROS, DEATH_SUBLINES } from './story.js';
 const LEVEL_THEMES = [
   // 0: Paradeplatz Vaults, Zurich (emerald marble + warm brass)
   {
+    material: 'marble',
     wallFill: '#17261f',
     wallDark: '#0d1712',
     wallHi: '#2a4236',
@@ -33,6 +39,7 @@ const LEVEL_THEMES = [
   },
   // 1: Olten SBB Gleis 0, Solothurn (brushed transit concrete + SBB cobalt + sodium ochre)
   {
+    material: 'concrete_sbb',
     wallFill: '#2d3338',
     wallDark: '#171b1f',
     wallHi: '#454e56',
@@ -50,6 +57,7 @@ const LEVEL_THEMES = [
   },
   // 2: Gotthard Reduit Fortress, Uri/Ticino (blast concrete + hazard ochre)
   {
+    material: 'bunker',
     wallFill: '#292e2c',
     wallDark: '#161a19',
     wallHi: '#3d4542',
@@ -67,6 +75,7 @@ const LEVEL_THEMES = [
   },
   // 3: Grande Dixence Dam Galleries, Valais (brutalist concrete + hydro-teal)
   {
+    material: 'dam',
     wallFill: '#2b333a',
     wallDark: '#161c21',
     wallHi: '#424e59',
@@ -84,6 +93,7 @@ const LEVEL_THEMES = [
   },
   // 4: Chateau de Chillon Viaduct Vaults, Vaud (Savoyard limestone + turquoise hydro)
   {
+    material: 'limestone',
     wallFill: '#383129',
     wallDark: '#1f1b16',
     wallHi: '#544a3e',
@@ -101,6 +111,7 @@ const LEVEL_THEMES = [
   },
   // 5: CERN Ring Sector 4, Geneva (cryo-steel + cyan/magenta photonics)
   {
+    material: 'cryosteel',
     wallFill: '#182742',
     wallDark: '#0d1628',
     wallHi: '#2a4470',
@@ -118,6 +129,7 @@ const LEVEL_THEMES = [
   },
   // 6: Bundeshaus Sub-Archives & Federal Mint, Bern (Bernese green-gold sandstone + brass)
   {
+    material: 'sandstone',
     wallFill: '#2d3326',
     wallDark: '#181c14',
     wallHi: '#464f3b',
@@ -135,6 +147,7 @@ const LEVEL_THEMES = [
   },
   // 7: Eigerwand North-Face Gallery, Jungfraubahn (black slate + frost brass)
   {
+    material: 'slate',
     wallFill: '#1b1f29',
     wallDark: '#0f1218',
     wallHi: '#31384a',
@@ -152,6 +165,7 @@ const LEVEL_THEMES = [
   },
   // 8: Jungfraujoch Ice Palace, Aletsch Glacier (glacial cyan ice + frost white)
   {
+    material: 'ice',
     wallFill: '#264b6e',
     wallDark: '#132a42',
     wallHi: '#5a94c2',
@@ -169,6 +183,7 @@ const LEVEL_THEMES = [
   },
   // 9: Sphinx Observatory Summit, 3,571m (alpine slate + summit brass + beacon red)
   {
+    material: 'summit',
     wallFill: '#232833',
     wallDark: '#13161e',
     wallHi: '#3c4557',
@@ -296,499 +311,7 @@ function drawIsoLine(ctx, x1, y1, x2, y2, color, width = 1) {
   ctx.stroke();
 }
 
-// ---------------------------------------------------------------------------
-// Character palettes
-// ---------------------------------------------------------------------------
-
-const CHAR_PALETTES = {
-  hero: {
-    skin: '#f0c49b',
-    hair: '#2a1d17',
-    jacket: '#d12c2c', // Swiss courier crimson
-    jacketDark: '#8f1b1b',
-    accent: '#f5f5f0', // white courier strap
-    pants: '#28303d',
-    pantsDark: '#181e27',
-    boots: '#121418',
-    sword: '#e6eef5',
-    hilt: '#d4a843',
-  },
-  deepfake: {
-    skin: '#9ae6ff',
-    hair: '#2b4770',
-    jacket: '#41c8e8',
-    jacketDark: '#1c6d94',
-    accent: '#d678ff',
-    pants: '#233b63',
-    pantsDark: '#14223d',
-    boots: '#111b30',
-    sword: '#b5f3ff',
-    hilt: '#c96eff',
-    glitch: true,
-  },
-  guard: {
-    skin: '#e0b48d',
-    hair: '#262b30',
-    jacket: '#53685e',
-    jacketDark: '#34443c',
-    accent: '#e0b956',
-    pants: '#2e3835',
-    pantsDark: '#1b2220',
-    boots: '#111414',
-    sword: '#dae4ec',
-    hilt: '#d4af4c',
-    cap: '#384840',
-    rim: '#8ca394',
-  },
-  elite: {
-    skin: '#e6be98',
-    hair: '#1f2630',
-    jacket: '#bcc7d4',
-    jacketDark: '#7c8896',
-    accent: '#d63e4a',
-    pants: '#2a3340',
-    pantsDark: '#1a2029',
-    boots: '#12161c',
-    sword: '#eef6ff',
-    hilt: '#48a4d4',
-    cap: '#435163',
-  },
-  zins: {
-    skin: '#ebd0b7',
-    hair: '#d8dde6', // silver hair
-    jacket: '#22242c', // tailored banker coat
-    jacketDark: '#13151a',
-    accent: '#d92b3a', // crimson pocket square / tie
-    pants: '#1a1c24',
-    pantsDark: '#101117',
-    boots: '#0c0d10',
-    sword: '#ffffff',
-    hilt: '#f0c451',
-  },
-  celine: {
-    skin: '#f2c8a2',
-    hair: '#4a2b1d',
-    jacket: '#2b446e',
-    jacketDark: '#1c2d4a',
-    accent: '#f0e6d2',
-    pants: '#252936',
-    pantsDark: '#171a24',
-    boots: '#1a181c',
-    sword: null,
-    hilt: null,
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Articulated Skeletal Pose Definitions (Forward Kinematics, angles in deg)
-// Angle convention: 0 = straight down (+y), +angle = forward (+x), -angle = backward (-x)
-// Torso angle: 0 = straight up (-y), +angle = leaning forward (+x), -angle = leaning back (-x)
-// ---------------------------------------------------------------------------
-
-function p(px, py, torso, head, lThigh, lShin, rThigh, rShin, lUpper, lFore, rUpper, rFore, sword = 0) {
-  return { px, py, torso, head, lThigh, lShin, rThigh, rShin, lUpper, lFore, rUpper, rFore, sword };
-}
-
-const ANIM_CLIPS = {
-  idle: [
-    p(0, -14.2, 4, 2, -6, -8, 10, 6, -12, 16, 12, 26, -15),
-    p(0, -13.9, 6, 4, -7, -9, 11, 7, -14, 18, 14, 28, -15),
-  ],
-  run_start: [
-    p(0, -13.0, 22, 10, -28, -42, 34, 6, -34, 15, 42, 78, -25),
-    p(1, -13.6, 26, 12, 28, -10, -24, -46, 36, 75, -32, 12, -25),
-  ],
-  run: [
-    p(0, -13.8, 24, 8, 46, 12, -38, -68, -48, 8, 52, 95, -20),
-    p(0, -15.2, 26, 8, 22, -26, -14, -60, -22, 22, 24, 72, -20),
-    p(0, -13.2, 24, 10, -10, -45, 22, -12, 16, 62, -18, 22, -20),
-    p(0, -13.8, 24, 8, -38, -68, 46, 12, 52, 95, -48, 8, -20),
-    p(0, -15.2, 26, 8, -14, -60, 22, -26, 24, 72, -22, 22, -20),
-    p(0, -13.2, 24, 10, 22, -12, -10, -45, -18, 22, 16, 62, -20),
-  ],
-  skid: [
-    p(-1, -12.5, -16, -6, -24, -18, 42, 24, -36, -10, 32, 54, -20),
-    p(-1, -13.2, -10, -3, -18, -14, 34, 18, -28, -4, 26, 44, -20),
-  ],
-  turn: [
-    p(0, -13.5, 10, 12, -14, -22, 16, 10, -20, 25, 22, 48, -15),
-    p(0, -14.0, -6, -8, 12, 6, -12, -16, 14, 32, -14, 12, -15),
-  ],
-  careful: [
-    p(0, -13.8, 12, 8, -10, -12, 16, 12, -16, 18, 22, 42, -15),
-    p(1, -13.5, 15, 12, -16, -14, 30, 18, -22, 12, 32, 52, -15),
-    p(0, -14.0, 6, 4, -6, -8, 10, 6, -12, 16, 14, 28, -15),
-  ],
-  crouch: [
-    p(0, -13.8, 8, 4, -8, -10, 12, 8, -12, 18, 14, 30, -15),
-    p(1, -7.8, 28, 10, -20, -76, 54, -22, -18, 26, 36, 60, -15),
-  ],
-  pickup: [
-    p(0, -13.5, 14, 10, -10, -16, 18, 6, -14, 18, 22, 38, -15),
-    p(1, -7.8, 34, 16, -24, -78, 56, -24, -10, 34, 48, 52, -15),
-    p(1, -9.2, 18, -6, -16, -62, 44, -18, -8, 28, 36, 118, -15),
-    p(0, -13.8, 6, 2, -6, -8, 10, 6, -12, 16, 14, 28, -15),
-  ],
-  jump_up: [
-    p(0, -9.5, 18, -4, -16, -54, 32, -26, -24, 18, 26, 56, -15),
-    p(0, -15.5, 4, -12, -6, -14, 12, -8, 152, 168, 162, 174, -15),
-    p(0, -14.8, 6, -8, -10, -24, 16, -16, 145, 160, 155, 170, -15),
-  ],
-  stand_jump: [
-    p(0, -9.8, 24, 8, -18, -56, 34, -20, -32, 12, 40, 74, -15),
-    p(0, -14.6, 22, 6, -26, -54, 48, 4, -38, 22, 74, 116, -15),
-    p(0, -13.8, 18, 8, -10, -48, 38, 16, -24, 18, 48, 84, -15),
-  ],
-  run_jump: [
-    p(0, -14.8, 30, 8, -46, -74, 58, 16, -56, -8, 92, 128, -15),
-    p(0, -15.2, 26, 6, -34, -68, 52, 22, -44, 12, 78, 114, -15),
-    p(0, -13.4, 20, 8, -14, -44, 40, 12, -22, 22, 46, 82, -15),
-  ],
-  fall: [
-    p(0, -14.0, 10, 14, -18, -52, 28, -22, 124, 152, 136, 164, -15),
-    p(0, -14.0, 14, 16, -12, -46, 34, -16, 116, 144, 144, 170, -15),
-  ],
-  land: [
-    p(0, -8.8, 24, 12, -20, -68, 44, -20, -26, 16, 34, 58, -15),
-    p(0, -13.8, 6, 2, -6, -8, 10, 6, -12, 16, 14, 28, -15),
-  ],
-  hard_land: [
-    p(0, -7.2, 34, 20, -26, -80, 56, -26, -32, 14, 42, 48, -15),
-    p(0, -9.2, 26, 14, -18, -62, 42, -18, -22, 18, 28, 44, -15),
-    p(0, -13.8, 8, 4, -8, -10, 12, 6, -12, 16, 14, 28, -15),
-  ],
-  hang: [
-    p(-2, -14.0, -4, -14, -6, -16, 6, -10, 162, 174, 168, 176, -15),
-    p(-2, -14.0, -2, -12, -2, -12, 10, -6, 160, 172, 166, 175, -15),
-  ],
-  climb_up: [
-    p(-2, -14.0, 6, -10, -8, -26, 24, -40, 152, 172, 158, 174, -15),
-    p(-1, -13.5, 22, -4, -14, -52, 56, -34, 96, 148, 108, 156, -15),
-    p(0, -10.0, 28, 6, -18, -68, 52, -22, 32, 66, 44, 72, -15),
-    p(0, -14.0, 6, 2, -6, -8, 10, 6, -12, 16, 14, 28, -15),
-  ],
-  climb_down: [
-    p(0, -14.0, 6, 2, -6, -8, 10, 6, -12, 16, 14, 28, -15),
-    p(0, -9.5, 28, 10, -18, -66, 48, -22, 36, 68, 46, 74, -15),
-    p(-2, -13.5, 16, -6, -12, -42, 36, -36, 128, 164, 136, 168, -15),
-    p(-2, -14.0, -4, -14, -6, -16, 6, -10, 162, 174, 168, 176, -15),
-  ],
-  combat_idle: [
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-    p(0, -12.4, 12, 4, -26, -30, 34, 12, -32, -62, 50, 102, 115),
-  ],
-  combat_advance: [
-    p(1, -12.2, 14, 4, -32, -32, 42, 14, -34, -64, 54, 104, 118),
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_retreat: [
-    p(-1, -12.6, 4, 2, -30, -24, 24, 10, -24, -52, 40, 94, 122),
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_strike: [
-    p(-1, -12.4, 2, 2, -26, -30, 30, 10, -30, -60, 40, 138, 158),
-    p(3, -11.0, 26, 8, -44, -42, 56, 14, -42, -74, 88, 94, 92),
-    p(2, -11.6, 20, 6, -36, -36, 46, 14, -36, -66, 74, 96, 98),
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_parry: [
-    p(-1, -12.6, -2, -2, -24, -28, 30, 10, -26, -56, 74, 136, 156),
-    p(-1, -12.8, 2, 0, -24, -28, 32, 12, -30, -60, 68, 130, 148),
-  ],
-  combat_parried: [
-    p(-2, -12.4, -10, -6, -26, -24, 28, 12, -38, -68, 34, 134, 156),
-    p(0, -12.8, 6, 2, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_feint: [
-    p(-1, -12.4, 6, 3, -24, -28, 34, 12, -28, -58, 56, 124, 142),
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_recover: [
-    p(2, -11.9, 18, 6, -30, -32, 42, 14, -34, -62, 60, 78, 70),
-    p(0, -12.8, 10, 4, -24, -28, 32, 10, -28, -58, 46, 98, 118),
-  ],
-  combat_hit: [
-    p(-2, -12.4, -18, -12, -26, -20, 26, 16, -48, -72, 24, 52, 62),
-    p(-1, -12.8, -6, -4, -24, -26, 30, 12, -34, -64, 38, 84, 104),
-  ],
-  sheathe: [
-    p(0, -13.2, 8, 4, -18, -20, 22, 10, -24, -36, 14, 44, 35),
-    p(0, -14.0, 4, 2, -6, -8, 10, 6, -12, 16, 12, 26, -15),
-  ],
-  dead: [
-    p(0, -9.2, 42, 34, -22, -46, 34, -18, -16, 20, 46, 44, 50),
-    p(2, -2.8, 84, 78, 72, 82, 78, 86, 68, 80, 82, 86, 86),
-  ],
-};
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function sampleClip(clipName, t, looping = false) {
-  const frames = ANIM_CLIPS[clipName] || ANIM_CLIPS.idle;
-  if (frames.length === 1) return frames[0];
-
-  let u = looping ? ((t % 1) + 1) % 1 : Math.max(0, Math.min(1, t));
-  let idx, nextIdx, frac;
-  if (looping) {
-    const pos = u * frames.length;
-    idx = Math.floor(pos) % frames.length;
-    nextIdx = (idx + 1) % frames.length;
-    frac = pos - Math.floor(pos);
-  } else {
-    const pos = u * (frames.length - 1);
-    idx = Math.min(frames.length - 1, Math.floor(pos));
-    nextIdx = Math.min(frames.length - 1, idx + 1);
-    frac = pos - idx;
-  }
-  const a = frames[idx];
-  const b = frames[nextIdx];
-  return {
-    px: lerp(a.px, b.px, frac),
-    py: lerp(a.py, b.py, frac),
-    torso: lerp(a.torso, b.torso, frac),
-    head: lerp(a.head, b.head, frac),
-    lThigh: lerp(a.lThigh, b.lThigh, frac),
-    lShin: lerp(a.lShin, b.lShin, frac),
-    rThigh: lerp(a.rThigh, b.rThigh, frac),
-    rShin: lerp(a.rShin, b.rShin, frac),
-    lUpper: lerp(a.lUpper, b.lUpper, frac),
-    lFore: lerp(a.lFore, b.lFore, frac),
-    rUpper: lerp(a.rUpper, b.rUpper, frac),
-    rFore: lerp(a.rFore, b.rFore, frac),
-    sword: lerp(a.sword, b.sword, frac),
-  };
-}
-
-function degRad(d) { return (d * Math.PI) / 180; }
-
-function limbEndDown(x, y, deg, len) {
-  const r = degRad(deg);
-  return { x: x + Math.sin(r) * len, y: y + Math.cos(r) * len };
-}
-
-function limbEndUp(x, y, deg, len) {
-  const r = degRad(deg);
-  return { x: x + Math.sin(r) * len, y: y - Math.cos(r) * len };
-}
-
-function drawSeg(ctx, x1, y1, x2, y2, width, color) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-}
-
-// Tapered polygon limb for sharper 1989 rotoscoped silhouette (replaces stick-figure tubes)
-function drawTapered(ctx, x1, y1, x2, y2, r1, r2, fill, outline = null) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  ctx.beginPath();
-  ctx.moveTo(x1 + nx * r1, y1 + ny * r1);
-  ctx.lineTo(x2 + nx * r2, y2 + ny * r2);
-  ctx.lineTo(x2 - nx * r2, y2 - ny * r2);
-  ctx.lineTo(x1 - nx * r1, y1 - ny * r1);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (outline) {
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
-  }
-}
-
-export function drawCharacter(ctx, ent, time) {
-  const pal = CHAR_PALETTES[ent.palette || 'hero'] || CHAR_PALETTES.hero;
-  const clip = ent.anim || 'idle';
-  const looping = clip === 'idle' || clip === 'run' || clip === 'fall' || clip === 'hang' || clip === 'combat_idle';
-  const pose = sampleClip(clip, ent.animT || 0, looping);
-
-  ctx.save();
-  ctx.translate(Math.round(ent.x), Math.round(ent.y));
-
-  // Oblique contact shadow on the floor's top face (world-space skew, independent of facing)
-  if (ent.grounded) {
-    ctx.save();
-    ctx.transform(1, 0, ISO_DX / ISO_DY, 1, 1.3, -0.7);
-    if (ent.alive) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 8.8, 2.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 5.8, 1.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      // Elongated shadow under fallen body lying on the top face
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
-      ctx.beginPath();
-      ctx.ellipse(ent.facing > 0 ? 4 : -4, -0.6, 12.5, 2.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  if (ent.facing < 0) {
-    ctx.scale(-1, 1);
-  }
-
-  // Deepfake glitch/transparency effect
-  if (pal.glitch) {
-    const jitter = Math.sin(time * 27 + ent.x) > 0.72 ? 1.5 : 0;
-    ctx.translate(jitter, 0);
-    ctx.globalAlpha = 0.82 + 0.14 * Math.sin(time * 14);
-  }
-
-  // Hit flash
-  const flashing = ent.hurtFlash > 0 && Math.floor(ent.hurtFlash * 24) % 2 === 0;
-
-  // Forward kinematics joints
-  const pelvis = { x: pose.px, y: pose.py };
-  const neck = limbEndUp(pelvis.x, pelvis.y, pose.torso, 9.4);
-  const head = limbEndUp(neck.x, neck.y, pose.head, 3.6);
-  const shoulder = { x: lerp(pelvis.x, neck.x, 0.86), y: lerp(pelvis.y, neck.y, 0.86) };
-
-  const lKnee = limbEndDown(pelvis.x, pelvis.y, pose.lThigh, 7.2);
-  const lFoot = limbEndDown(lKnee.x, lKnee.y, pose.lShin, 7.2);
-  const rKnee = limbEndDown(pelvis.x, pelvis.y, pose.rThigh, 7.2);
-  const rFoot = limbEndDown(rKnee.x, rKnee.y, pose.rShin, 7.2);
-
-  // Subtle foot-ground clamp when standing/walking so grounded feet feel planted
-  if (ent.grounded && ent.alive && clip !== 'dead') {
-    if (lFoot.y > 0) lFoot.y = 0;
-    if (rFoot.y > 0) rFoot.y = 0;
-  }
-
-  let lElbow = limbEndDown(shoulder.x, shoulder.y, pose.lUpper, 5.2);
-  let lHand = limbEndDown(lElbow.x, lElbow.y, pose.lFore, 5.2);
-  let rElbow = limbEndDown(shoulder.x, shoulder.y, pose.rUpper, 5.2);
-  let rHand = limbEndDown(rElbow.x, rElbow.y, pose.rFore, 5.2);
-
-  // Visual ledge-grip IK when hanging so hands visibly meet the oblique ledge rim
-  if (clip === 'hang') {
-    // Front hand grips near front-top corner of the slab; back hand grips along the receding oblique edge
-    const sway = Math.sin((ent.animT || 0) * Math.PI * 2) * 0.35;
-    const rTarget = { x: 4.3, y: -25.4 + sway * 0.2 };
-    const lTarget = ent.facing > 0
-      ? { x: 7.2, y: -28.0 + sway * 0.2 }
-      : { x: 1.5, y: -27.6 + sway * 0.2 };
-    rHand = rTarget;
-    lHand = lTarget;
-    rElbow = { x: lerp(shoulder.x, rTarget.x, 0.48) - 1.2, y: lerp(shoulder.y, rTarget.y, 0.45) - 0.5 };
-    lElbow = { x: lerp(shoulder.x, lTarget.x, 0.48) - 0.8, y: lerp(shoulder.y, lTarget.y, 0.45) - 0.8 };
-  }
-
-  const jacket = flashing ? '#ffffff' : pal.jacket;
-  const jacketDark = flashing ? '#ffcccc' : pal.jacketDark;
-  const pants = flashing ? '#ffffff' : pal.pants;
-  const pantsDark = flashing ? '#ffcccc' : pal.pantsDark;
-  const skin = flashing ? '#ffffff' : pal.skin;
-  const outline = 'rgba(6, 9, 12, 0.55)';
-
-  // Back arm
-  drawTapered(ctx, shoulder.x, shoulder.y, lElbow.x, lElbow.y, 1.35, 1.05, jacketDark);
-  drawTapered(ctx, lElbow.x, lElbow.y, lHand.x, lHand.y, 1.0, 0.8, skin);
-
-  // Back leg + boot
-  drawTapered(ctx, pelvis.x, pelvis.y, lKnee.x, lKnee.y, 1.65, 1.25, pantsDark);
-  drawTapered(ctx, lKnee.x, lKnee.y, lFoot.x, lFoot.y, 1.25, 0.95, pantsDark);
-  ctx.fillStyle = pal.boots;
-  ctx.fillRect(lFoot.x - 1, lFoot.y - 1.5, 4.2, 2.0);
-
-  // Tapered tailored torso (broader chest/shoulders, trim waist) + rim/strap accents
-  drawTapered(ctx, pelvis.x, pelvis.y + 0.5, neck.x, neck.y - 0.3, 2.1, 2.9, jacket, outline);
-  if (pal.rim) {
-    drawSeg(ctx, shoulder.x - 2, shoulder.y, shoulder.x + 2.2, shoulder.y - 0.5, 1.0, pal.accent);
-  }
-  // Diagonal courier strap / uniform sash + belt
-  drawSeg(ctx, pelvis.x - 1.0, pelvis.y - 1.2, shoulder.x + 1.2, shoulder.y + 0.2, 1.2, pal.accent);
-  drawSeg(ctx, pelvis.x - 2.0, pelvis.y - 0.2, pelvis.x + 2.0, pelvis.y - 0.2, 1.2, pal.boots);
-
-  // Front leg + boot
-  drawTapered(ctx, pelvis.x, pelvis.y, rKnee.x, rKnee.y, 1.8, 1.35, pants, outline);
-  drawTapered(ctx, rKnee.x, rKnee.y, rFoot.x, rFoot.y, 1.35, 1.0, pants, outline);
-  ctx.fillStyle = pal.boots;
-  ctx.fillRect(rFoot.x - 1, rFoot.y - 1.6, 4.6, 2.2);
-
-  // Head & hair
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.arc(head.x, head.y, 2.9, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = outline;
-  ctx.lineWidth = 0.5;
-  ctx.stroke();
-
-  ctx.fillStyle = pal.hair;
-  ctx.beginPath();
-  ctx.arc(head.x - 0.5, head.y - 1.0, 2.8, Math.PI * 0.88, Math.PI * 2.18);
-  ctx.fill();
-
-  // Optional guard cap/helmet with brass visor rim
-  if (pal.cap) {
-    ctx.fillStyle = pal.cap;
-    ctx.fillRect(head.x - 3.3, head.y - 4.1, 6.6, 2.3);
-    ctx.fillRect(head.x + 1.0, head.y - 2.6, 3.2, 1.0);
-    ctx.fillStyle = pal.accent;
-    ctx.fillRect(head.x - 2.6, head.y - 2.4, 5.2, 0.8);
-  }
-
-  // Drawn sword (if armed and in combat stance or unsheathing)
-  if (ent.swordDrawn && pal.sword) {
-    const bladeEnd = limbEndDown(rHand.x, rHand.y, pose.sword, 17.5);
-    const guardA = limbEndDown(rHand.x, rHand.y, pose.sword + 90, 2.6);
-    const guardB = limbEndDown(rHand.x, rHand.y, pose.sword - 90, 2.6);
-    drawTapered(ctx, rHand.x, rHand.y, bladeEnd.x, bladeEnd.y, 1.0, 0.35, pal.sword);
-    drawSeg(ctx, guardA.x, guardA.y, guardB.x, guardB.y, 1.8, pal.hilt);
-
-    // Readable blade-glint telegraph star during enemy strike windup / feint!
-    if (ent.strikeTelegraph > 0 && (ent.state === 'combat_strike' || ent.state === 'combat_feint')) {
-      const gx = bladeEnd.x;
-      const gy = bladeEnd.y;
-      if (ent.state === 'combat_feint') {
-        // Subtle smaller warm-amber spark for feints (distinguishable from committed lunges!)
-        ctx.fillStyle = '#f0b84a';
-        ctx.fillRect(gx - 2.2, gy - 0.5, 4.4, 1.0);
-        ctx.fillRect(gx - 0.5, gy - 2.2, 1.0, 4.4);
-      } else {
-        const starCol = ent.strikeKind === 'heavy' ? '#ff9442' :
-          ent.strikeKind === 'riposte' ? '#8cecff' : '#fff5a8';
-        const arm = ent.strikeKind === 'heavy' ? 4.2 : 3.5;
-        ctx.fillStyle = starCol;
-        ctx.fillRect(gx - arm, gy - 0.6, arm * 2, 1.2);
-        ctx.fillRect(gx - 0.6, gy - arm, 1.2, arm * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(gx - 1.2, gy - 1.2, 2.4, 2.4);
-      }
-    }
-  } else if (ent.hasSword && pal.sword && ent.alive) {
-    // Sheathed sabre at hip
-    drawSeg(ctx, pelvis.x - 1, pelvis.y, pelvis.x - 9, pelvis.y + 5, 1.3, pal.hilt);
-  }
-
-  // Front arm
-  drawTapered(ctx, shoulder.x, shoulder.y, rElbow.x, rElbow.y, 1.45, 1.1, jacket, outline);
-  drawTapered(ctx, rElbow.x, rElbow.y, rHand.x, rHand.y, 1.05, 0.85, skin);
-
-  // Celine holds the glowing cryptographic key tablet
-  if (ent.palette === 'celine') {
-    ctx.fillStyle = '#5ee8ff';
-    ctx.fillRect(rHand.x - 1, rHand.y - 3, 4, 5);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(rHand.x, rHand.y - 2, 2, 2);
-  }
-
-  ctx.restore();
-}
+// Character rendering has been moved to src/character.js (re-exported above).
 
 // ---------------------------------------------------------------------------
 // SBB Swiss Railway Station Clock (Mondaine iconic style)
@@ -801,10 +324,14 @@ export function drawSwissClock(ctx, cx, cy, r, timeRemainingSec) {
   const secs = elapsed % 60;
 
   ctx.save();
-  // Outer metal rim
-  ctx.fillStyle = '#2a2e35';
+  // Outer brushed metal casing + subtle bezel specular
+  ctx.fillStyle = '#1b1f26';
   ctx.beginPath();
-  ctx.arc(cx, cy, r + 1.5, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r + 1.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#363c47';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 1.2, 0, Math.PI * 2);
   ctx.fill();
 
   // Crisp white dial
@@ -812,14 +339,17 @@ export function drawSwissClock(ctx, cx, cy, r, timeRemainingSec) {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+  ctx.lineWidth = 0.45;
+  ctx.stroke();
 
-  // Hour ticks
+  // Hour ticks (crisp 2x Mondaine batons)
   ctx.strokeStyle = '#15171a';
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
     const major = i % 3 === 0;
-    const inner = r * (major ? 0.68 : 0.78);
-    ctx.lineWidth = major ? Math.max(1, r * 0.1) : Math.max(0.7, r * 0.06);
+    const inner = r * (major ? 0.66 : 0.78);
+    ctx.lineWidth = major ? Math.max(0.85, r * 0.1) : Math.max(0.55, r * 0.055);
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
     ctx.lineTo(cx + Math.cos(a) * (r * 0.92), cy + Math.sin(a) * (r * 0.92));
@@ -829,33 +359,37 @@ export function drawSwissClock(ctx, cx, cy, r, timeRemainingSec) {
   // Hour hand (from 11:00 -> 12:00)
   const hourAngle = ((11 + mins / 60) / 12) * Math.PI * 2 - Math.PI / 2;
   ctx.strokeStyle = '#141619';
-  ctx.lineWidth = Math.max(1.2, r * 0.14);
+  ctx.lineWidth = Math.max(1.05, r * 0.135);
   ctx.beginPath();
-  ctx.moveTo(cx - Math.cos(hourAngle) * r * 0.15, cy - Math.sin(hourAngle) * r * 0.15);
+  ctx.moveTo(cx - Math.cos(hourAngle) * r * 0.16, cy - Math.sin(hourAngle) * r * 0.16);
   ctx.lineTo(cx + Math.cos(hourAngle) * r * 0.56, cy + Math.sin(hourAngle) * r * 0.56);
   ctx.stroke();
 
   // Minute hand (0 -> 60 -> 12:00)
   const minAngle = (mins / 60) * Math.PI * 2 - Math.PI / 2;
-  ctx.lineWidth = Math.max(1.0, r * 0.1);
+  ctx.lineWidth = Math.max(0.85, r * 0.095);
   ctx.beginPath();
-  ctx.moveTo(cx - Math.cos(minAngle) * r * 0.18, cy - Math.sin(minAngle) * r * 0.18);
-  ctx.lineTo(cx + Math.cos(minAngle) * r * 0.80, cy + Math.sin(minAngle) * r * 0.80);
+  ctx.moveTo(cx - Math.cos(minAngle) * r * 0.19, cy - Math.sin(minAngle) * r * 0.19);
+  ctx.lineTo(cx + Math.cos(minAngle) * r * 0.81, cy + Math.sin(minAngle) * r * 0.81);
   ctx.stroke();
 
   // Iconic SBB red lollipop second hand: authentic 58.5s sweep + 1.5s pause at 12 o'clock!
   const sbbSec = Math.min(60, (secs / 58.5) * 60);
   const secAngle = (sbbSec / 60) * Math.PI * 2 - Math.PI / 2;
   ctx.strokeStyle = '#d92626';
-  ctx.lineWidth = Math.max(0.8, r * 0.06);
+  ctx.lineWidth = Math.max(0.55, r * 0.05);
   ctx.beginPath();
-  ctx.moveTo(cx - Math.cos(secAngle) * r * 0.22, cy - Math.sin(secAngle) * r * 0.22);
-  ctx.lineTo(cx + Math.cos(secAngle) * r * 0.70, cy + Math.sin(secAngle) * r * 0.70);
+  ctx.moveTo(cx - Math.cos(secAngle) * r * 0.24, cy - Math.sin(secAngle) * r * 0.24);
+  ctx.lineTo(cx + Math.cos(secAngle) * r * 0.68, cy + Math.sin(secAngle) * r * 0.68);
   ctx.stroke();
 
   ctx.fillStyle = '#d92626';
   ctx.beginPath();
-  ctx.arc(cx + Math.cos(secAngle) * r * 0.66, cy + Math.sin(secAngle) * r * 0.66, Math.max(1.1, r * 0.11), 0, Math.PI * 2);
+  ctx.arc(cx + Math.cos(secAngle) * r * 0.66, cy + Math.sin(secAngle) * r * 0.66, Math.max(1.0, r * 0.115), 0, Math.PI * 2);
+  ctx.fill();
+  // Center pin
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(0.65, r * 0.06), 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -908,6 +442,112 @@ function tileHasLeftReveal(level, room, c, r) {
   return getWallGeom(level, room, c, r).hasLeftReveal;
 }
 
+function drawWallMaterialDetail(ctx, fx, topY, fw, fh, theme, c, r) {
+  const mat = theme.material;
+  const seed = ((c * 31 + r * 17) & 15);
+  if (mat === 'marble') {
+    // Organic subtle emerald marble veining (broken asymmetric mineral veins)
+    ctx.strokeStyle = 'rgba(185, 235, 210, 0.055)';
+    ctx.lineWidth = 0.5;
+    if ((seed & 3) !== 0) {
+      const vx0 = fx + 3 + (seed % 9);
+      const vy0 = topY + 2 + ((seed * 3) % 5);
+      ctx.beginPath();
+      ctx.moveTo(vx0, vy0);
+      ctx.lineTo(Math.min(fx + fw - 3, vx0 + 5), Math.min(topY + fh - 3, vy0 + 4));
+      ctx.lineTo(Math.min(fx + fw - 2, vx0 + 9), Math.min(topY + fh - 2, vy0 + 10));
+      ctx.stroke();
+    }
+    if (fh > 22 && (seed & 1) === 0) {
+      const vx1 = fx + fw - 3 - ((seed * 5) % 8);
+      ctx.beginPath();
+      ctx.moveTo(vx1, topY + 18);
+      ctx.lineTo(Math.max(fx + 3, vx1 - 4), topY + 23);
+      ctx.lineTo(Math.max(fx + 2, vx1 - 10), Math.min(topY + fh - 2, topY + 28));
+      ctx.stroke();
+    }
+  } else if (mat === 'concrete_sbb' || mat === 'bunker') {
+    // Board-formed shuttering micro-lines + recessed corner form-tie bolts
+    ctx.fillStyle = 'rgba(255,255,255,0.035)';
+    for (let y = 5; y < fh - 3; y += 6) {
+      ctx.fillRect(fx + 1, topY + y, fw - 2, 0.5);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.34)';
+    if (fh > 12) {
+      ctx.fillRect(fx + 3, topY + 4, 1, 1);
+      ctx.fillRect(fx + fw - 4, topY + 4, 1, 1);
+    }
+    if (fh > 28) {
+      ctx.fillRect(fx + 3, topY + 20, 1, 1);
+      ctx.fillRect(fx + fw - 4, topY + 20, 1, 1);
+    }
+  } else if (mat === 'dam') {
+    // Brutalist cyclopean formwork seams + damp seepage streaks
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    ctx.fillRect(fx + 6 + (seed % 5), topY + 1, 0.5, fh - 2);
+    if (seed % 3 === 0) {
+      const dg = ctx.createLinearGradient(0, topY + 15, 0, topY + Math.min(fh, 36));
+      dg.addColorStop(0, 'rgba(24, 90, 108, 0.22)');
+      dg.addColorStop(1, 'rgba(24, 90, 108, 0)');
+      ctx.fillStyle = dg;
+      ctx.fillRect(fx + 8 + (seed % 10), topY + 15, 2.5, Math.min(fh - 15, 20));
+    }
+  } else if (mat === 'limestone' || mat === 'sandstone') {
+    // Dressed stone micro-speckling & warm chiseled ashlar facets
+    ctx.fillStyle = 'rgba(255, 242, 210, 0.06)';
+    ctx.fillRect(fx + 2 + (seed % 11), topY + 3, 6, 1);
+    if (fh > 20) ctx.fillRect(fx + 4 + ((seed * 3) % 12), topY + 19, 7, 1);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+    ctx.fillRect(fx + 5 + ((seed * 5) % 14), topY + 9, 1.5, 1);
+    if (fh > 28) ctx.fillRect(fx + 3 + ((seed * 7) % 16), topY + 25, 1.5, 1);
+  } else if (mat === 'cryosteel') {
+    // Machined cryo-steel bevelled panels + hex bolts
+    ctx.strokeStyle = 'rgba(130, 210, 255, 0.14)';
+    ctx.lineWidth = 0.5;
+    if (fw > 10 && fh > 14) {
+      ctx.strokeRect(fx + 2.25, topY + 2.25, fw - 4.5, Math.min(11, fh - 4.5));
+    }
+    if (fw > 10 && fh > 30) {
+      ctx.strokeRect(fx + 2.25, topY + 17.25, fw - 4.5, Math.min(12, fh - 19.5));
+    }
+    ctx.fillStyle = 'rgba(130, 210, 255, 0.35)';
+    ctx.fillRect(fx + 3.5, topY + 3.5, 0.8, 0.8);
+    ctx.fillRect(fx + fw - 4.3, topY + 3.5, 0.8, 0.8);
+  } else if (mat === 'slate' || mat === 'summit') {
+    // Hewn alpine slate strata & crisp frost rime flecks
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(fx + 2, topY + 7 + (seed % 4));
+    ctx.lineTo(fx + fw - 3, topY + 5 + (seed % 4));
+    if (fh > 24) {
+      ctx.moveTo(fx + 3, topY + 23 + (seed % 4));
+      ctx.lineTo(fx + fw - 2, topY + 21 + (seed % 4));
+    }
+    ctx.stroke();
+    if (mat === 'summit' && fh > 12) {
+      ctx.fillStyle = hexRgba(theme.wallTrim, 0.38);
+      ctx.fillRect(fx + 3, topY + 4, 1, 1);
+      ctx.fillRect(fx + fw - 4, topY + 4, 1, 1);
+    }
+  } else if (mat === 'ice') {
+    // Translucent glacial crystal refraction facets & frost speculars!
+    ctx.fillStyle = 'rgba(215, 248, 255, 0.14)';
+    ctx.beginPath();
+    ctx.moveTo(fx + 2 + (seed % 6), topY + 2);
+    ctx.lineTo(fx + Math.min(fw - 2, 13 + (seed % 6)), topY + 2);
+    ctx.lineTo(fx + Math.min(fw - 2, 7 + (seed % 6)), topY + Math.min(fh - 2, 14));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(235, 252, 255, 0.26)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(fx + fw - 4, topY + 4);
+    ctx.lineTo(fx + Math.max(2, fw - 12), topY + Math.min(fh - 2, 18));
+    ctx.stroke();
+  }
+}
+
 function drawWallFrontFace(ctx, x, topY, theme, geom, c, r) {
   const { leftWall, rightWall, upWall, downWall, isPillar, hasLeftReveal, hasSoffit, soffitH, notchBL, notchBLH } = geom;
   const fx = x + (hasLeftReveal ? WALL_REVEAL_L : 0);
@@ -945,22 +585,26 @@ function drawWallFrontFace(ctx, x, topY, theme, geom, c, r) {
     ctx.fillRect(px, topY, 2, fh);
     ctx.fillStyle = theme.wallHi;
     ctx.fillRect(px + pw - 3, topY, 3, fh);
+    ctx.fillStyle = theme.wallArrisHi;
+    ctx.fillRect(px + pw - 0.5, topY, 0.5, fh);
     // Central fluted grooves
     const flTop = topY + (upWall ? 0 : 7);
     const flH = Math.max(4, fh - (upWall ? 0 : 7) - (downWall ? 0 : 7));
-    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
     ctx.fillRect(px + 6, flTop, 2, flH);
     ctx.fillRect(px + 13, flTop, 2, flH);
     ctx.fillRect(px + 20, flTop, 2, flH);
-    ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    ctx.fillRect(px + 8, flTop, 1, flH);
-    ctx.fillRect(px + 15, flTop, 1, flH);
-    ctx.fillRect(px + 22, flTop, 1, flH);
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(px + 8, flTop, 0.5, flH);
+    ctx.fillRect(px + 15, flTop, 0.5, flH);
+    ctx.fillRect(px + 22, flTop, 0.5, flH);
 
     // Capital crown when exposed at top
     if (!upWall) {
       ctx.fillStyle = theme.wallHi;
       ctx.fillRect(fx, topY, fw, 3);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(fx, topY, fw, 0.5);
       ctx.fillStyle = theme.wallTrim;
       ctx.fillRect(fx + 1, topY + 3, fw - 2, 2);
       ctx.fillStyle = theme.wallDark;
@@ -985,65 +629,74 @@ function drawWallFrontFace(ctx, x, topY, theme, geom, c, r) {
 
   // Subtle vertical shading gradient across the face
   const g = ctx.createLinearGradient(fx, topY, fx, topY + fh);
-  g.addColorStop(0, 'rgba(255,255,255,0.05)');
-  g.addColorStop(0.6, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(0,0,0,0.18)');
+  g.addColorStop(0, 'rgba(255,255,255,0.06)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.20)');
   ctx.fillStyle = g;
   ctx.fillRect(fx, topY, fw, fh);
 
-  // Coursed ashlar / panel horizontal & vertical joints (clipped cleanly inside front face)
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  // Per-level 2x material surface grain / veining / panels
+  drawWallMaterialDetail(ctx, fx, topY, fw, fh, theme, c, r);
+
+  // Crisp 2x coursed ashlar / panel horizontal & vertical joints
   for (const cy of [15, 31]) {
     if (cy < fh - 2) {
-      ctx.fillRect(fx, topY + cy, fw, 1);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(fx, topY + cy + 1, fw, 1);
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(fx, topY + cy, fw, 0.75);
+      ctx.fillStyle = 'rgba(255,255,255,0.09)';
+      ctx.fillRect(fx, topY + cy + 0.75, fw, 0.5);
     }
   }
   const j1 = 10 + ((c * 7 + r * 5) & 7);
   const j2 = 4 + ((c * 11 + r * 3) & 7);
   const j3 = 18 + ((c * 5 + r * 9) & 7);
-  if (x + j1 > fx + 1 && x + j1 < fx + fw - 1) ctx.fillRect(x + j1, topY + (upWall ? 0 : 2), 1, Math.min(15, fh) - (upWall ? 0 : 2));
-  if (x + j2 > fx + 1 && x + j2 < fx + fw - 1 && fh > 16) ctx.fillRect(x + j2, topY + 16, 1, Math.min(15, fh - 16));
-  if (x + j3 > fx + 1 && x + j3 < fx + fw - 1 && fh > 32) ctx.fillRect(x + j3, topY + 32, 1, Math.max(0, fh - 32));
+  const drawVertJoint = (jx, y0, h) => {
+    if (jx <= fx + 1 || jx >= fx + fw - 1 || h <= 0) return;
+    ctx.fillStyle = 'rgba(0,0,0,0.26)';
+    ctx.fillRect(jx, y0, 0.75, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(jx + 0.75, y0, 0.5, h);
+  };
+  drawVertJoint(x + j1, topY + (upWall ? 0 : 2), Math.min(15, fh) - (upWall ? 0 : 2));
+  if (fh > 16) drawVertJoint(x + j2, topY + 16, Math.min(15, fh - 16));
+  if (fh > 32) drawVertJoint(x + j3, topY + 32, Math.max(0, fh - 32));
 
-  // Crisp 3D edge bevels ONLY on exposed outer edges (no double seams between adjacent walls!)
+  // Crisp 2x 3D edge bevels ONLY on exposed outer edges (no double seams between adjacent walls!)
   if (!upWall) {
     ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(fx, topY, fw, 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.20)';
-    ctx.fillRect(fx, topY, fw, 1);
+    ctx.fillRect(fx, topY, fw, 1.5);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(fx, topY, fw, 0.5);
   }
   if (!rightWall) {
     // Crisp lit vertical front arris where front face turns onto the 9px lit right side face
-    ctx.fillStyle = theme.wallArrisHi;
-    ctx.fillRect(fx + fw - 1, topY, 1, fh);
     ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(fx + fw - 2, topY, 1, fh);
+    ctx.fillRect(fx + fw - 1.5, topY, 1.5, fh);
+    ctx.fillStyle = theme.wallArrisHi;
+    ctx.fillRect(fx + fw - 0.5, topY, 0.5, fh);
   }
   if (!leftWall) {
     // Crisp corner crease where front face turns into the shadowed left inner reveal
     ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(fx, topY, 1, fh);
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.fillRect(fx + 1, topY, 1, fh);
+    ctx.fillRect(fx, topY, 0.75, fh);
+    ctx.fillStyle = 'rgba(0,0,0,0.26)';
+    ctx.fillRect(fx + 0.75, topY, 0.75, fh);
   }
   if (hasSoffit) {
     // Architectural lower cornice rim where front face turns under into the ceiling soffit
-    ctx.fillStyle = hexRgba(theme.wallTrim, 0.55);
-    ctx.fillRect(fx, topY + fh - 3, fw, 1);
+    ctx.fillStyle = hexRgba(theme.wallTrim, 0.65);
+    ctx.fillRect(fx, topY + fh - 2.5, fw, 0.75);
     ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(fx, topY + fh - 2, fw, 1);
+    ctx.fillRect(fx, topY + fh - 1.75, fw, 0.75);
     ctx.fillStyle = theme.wallDark;
     ctx.fillRect(fx, topY + fh - 1, fw, 1);
   }
   if (notchBL) {
     // Continue the ceiling cornice cleanly into the top-right miter corner
-    ctx.fillStyle = hexRgba(theme.wallTrim, 0.55);
-    ctx.fillRect(fx, topY + fh - notchBLH - 3, WALL_REVEAL_L + 1, 1);
+    ctx.fillStyle = hexRgba(theme.wallTrim, 0.65);
+    ctx.fillRect(fx, topY + fh - notchBLH - 2.5, WALL_REVEAL_L + 1, 0.75);
     ctx.fillStyle = theme.wallHi;
-    ctx.fillRect(fx, topY + fh - notchBLH - 2, WALL_REVEAL_L + 1, 1);
+    ctx.fillRect(fx, topY + fh - notchBLH - 1.75, WALL_REVEAL_L + 1, 0.75);
     ctx.fillStyle = theme.wallDark;
     ctx.fillRect(fx, topY + fh - notchBLH - 1, WALL_REVEAL_L, 1);
     ctx.restore();
@@ -1257,24 +910,26 @@ function drawFloorSlabFront(ctx, fx, fyy, theme, {
 
   ctx.fillStyle = theme.floorFace;
   ctx.fillRect(fx, yF, W, SLAB_FRONT_H);
-  // Crisp front-top bevel edge
+  // Crisp 2x front-top specular chamfer edge
   ctx.fillStyle = theme.floorEdgeBevel;
-  ctx.fillRect(fx, yF, W, 1);
-  // Dark underside rim
+  ctx.fillRect(fx, yF, W, 0.75);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillRect(fx, yF, W, 0.4);
+  // Dark underside rim + subtle lower lip
   ctx.fillStyle = theme.floorDark;
-  ctx.fillRect(fx, yF + SLAB_FRONT_H - 1, W, 1);
+  ctx.fillRect(fx, yF + SLAB_FRONT_H - 0.85, W, 0.85);
 
-  // Subtle vertical masonry joints
-  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  // Subtle vertical masonry joints (0.5px precision at 2x)
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
   if (leftHasFloor || isLoose) {
-    ctx.fillRect(fx, yF + 1, 1, SLAB_FRONT_H - 1);
+    ctx.fillRect(fx, yF + 0.75, 0.75, SLAB_FRONT_H - 0.75);
   }
-  ctx.fillRect(fx + 16, yF + 1, 1, SLAB_FRONT_H - 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  ctx.fillRect(fx + 17, yF + 1, 1, SLAB_FRONT_H - 2);
+  ctx.fillRect(fx + 16, yF + 0.75, 0.75, SLAB_FRONT_H - 1.5);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(fx + 16.75, yF + 0.75, 0.5, SLAB_FRONT_H - 1.5);
   if (extraRightW > 0) {
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.fillRect(fx + TILE_W, yF + 1, 1, SLAB_FRONT_H - 2);
+    ctx.fillRect(fx + TILE_W, yF + 0.75, 0.75, SLAB_FRONT_H - 1.5);
   }
 
   if (isLoose) {
@@ -1282,23 +937,25 @@ function drawFloorSlabFront(ctx, fx, fyy, theme, {
     ctx.fillStyle = '#05070a';
     ctx.fillRect(fx + 1, yF, 1, SLAB_FRONT_H);
     ctx.fillRect(fx + TILE_W - 2, yF, 1, SLAB_FRONT_H);
-    ctx.fillRect(fx + 8, yF, 2, SLAB_FRONT_H);
-    ctx.fillRect(fx + 20, yF, 2, SLAB_FRONT_H);
-    ctx.fillStyle = '#e8dcc0';
-    ctx.fillRect(fx + 6, yF, 2, 1);
-    ctx.fillRect(fx + 18, yF, 2, 1);
+    ctx.fillRect(fx + 8.5, yF, 1.5, SLAB_FRONT_H);
+    ctx.fillRect(fx + 20.5, yF, 1.5, SLAB_FRONT_H);
+    ctx.fillStyle = '#ede0c4';
+    ctx.fillRect(fx + 6.5, yF, 2, 0.75);
+    ctx.fillRect(fx + 18.5, yF, 2, 0.75);
     ctx.fillStyle = theme.floorTrim;
-    ctx.fillRect(fx + 2, yF + 2, 3, 1);
-    ctx.fillRect(fx + TILE_W - 5, yF + 2, 3, 1);
+    ctx.fillRect(fx + 2, yF + 2, 3, 0.75);
+    ctx.fillRect(fx + TILE_W - 5, yF + 2, 3, 0.75);
   }
 
-  // Preserve front brass corner brackets on climbable/drop ledges across both base & foreground passes
+  // Preserve front brass corner brackets with fine rivets on climbable/drop ledges
   if (climbLeft) {
     ctx.fillStyle = theme.floorTrim;
     ctx.fillRect(fx, yF, 5, 3);
-    ctx.fillStyle = '#fff3cf';
-    ctx.fillRect(fx, yF, 5, 1);
-    ctx.fillRect(fx, yF, 1, SLAB_FRONT_H);
+    ctx.fillStyle = '#fff5d4';
+    ctx.fillRect(fx, yF, 5, 0.75);
+    ctx.fillRect(fx, yF, 0.75, SLAB_FRONT_H);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(fx + 3, yF + 1.5, 0.75, 0.75);
   } else if (dropLeft) {
     ctx.fillStyle = theme.floorTrim;
     ctx.fillRect(fx, yF, 3, 2);
@@ -1306,9 +963,11 @@ function drawFloorSlabFront(ctx, fx, fyy, theme, {
   if (climbRight) {
     ctx.fillStyle = theme.floorTrim;
     ctx.fillRect(fx + TILE_W - 5, yF, 5, 3);
-    ctx.fillStyle = '#fff3cf';
-    ctx.fillRect(fx + TILE_W - 5, yF, 5, 1);
-    ctx.fillRect(fx + TILE_W - 1, yF, 1, SLAB_FRONT_H);
+    ctx.fillStyle = '#fff5d4';
+    ctx.fillRect(fx + TILE_W - 5, yF, 5, 0.75);
+    ctx.fillRect(fx + TILE_W - 0.75, yF, 0.75, SLAB_FRONT_H);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(fx + TILE_W - 3.75, yF + 1.5, 0.75, 0.75);
   } else if (dropRight) {
     ctx.fillStyle = theme.floorTrim;
     ctx.fillRect(fx + TILE_W - 3, yF, 3, 2);
@@ -1649,18 +1308,22 @@ function drawStaticRoomFg(ctx, level, room, theme) {
 }
 
 function getStaticRoomLayers(level, room, theme) {
-  const key = `${level.id}:${room.id}`;
+  const key = `${level.id}:${room.id}@${RENDER_SCALE}`;
   let entry = roomStaticCache.get(key);
   if (entry) return entry;
 
-  const base = createOffscreen(VIEW_W, PLAY_H);
-  const fg = createOffscreen(VIEW_W, PLAY_H);
+  const pw = VIEW_W * RENDER_SCALE;
+  const ph = PLAY_H * RENDER_SCALE;
+  const base = createOffscreen(pw, ph);
+  const fg = createOffscreen(pw, ph);
   if (!base || !fg) {
     return null;
   }
 
-  base.ctx.imageSmoothingEnabled = false;
-  fg.ctx.imageSmoothingEnabled = false;
+  base.ctx.imageSmoothingEnabled = true;
+  fg.ctx.imageSmoothingEnabled = true;
+  base.ctx.scale(RENDER_SCALE, RENDER_SCALE);
+  fg.ctx.scale(RENDER_SCALE, RENDER_SCALE);
   drawStaticRoomBase(base.ctx, level, room, theme);
   drawStaticRoomFg(fg.ctx, level, room, theme);
 
@@ -1679,23 +1342,34 @@ function getStaticRoomLayers(level, room, theme) {
 
 export function renderGame(ctx, game) {
   const { mode, time, level, player, enemies } = game;
+  const sx = ctx.canvas && ctx.canvas.width ? ctx.canvas.width / VIEW_W : RENDER_SCALE;
+  const sy = ctx.canvas && ctx.canvas.height ? ctx.canvas.height / VIEW_H : RENDER_SCALE;
+
+  ctx.save();
+  ctx.setTransform(sx, 0, 0, sy, 0, 0);
   ctx.imageSmoothingEnabled = false;
 
   if (mode === 'title') {
     renderTitle(ctx, game);
+    ctx.restore();
     return;
   }
   if (mode === 'level_select') {
     renderLevelSelect(ctx, game);
+    ctx.restore();
     return;
   }
   if (mode === 'intro' || mode === 'interlude' || mode === 'victory' || mode === 'timeout') {
     renderStoryScreen(ctx, game);
+    ctx.restore();
     return;
   }
 
   const room = level.getRoom(player.roomId);
-  if (!room) return;
+  if (!room) {
+    ctx.restore();
+    return;
+  }
   const theme = getIsoTheme(level.id);
 
   // Camera shake
@@ -1705,22 +1379,23 @@ export function renderGame(ctx, game) {
     ctx.translate((Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2);
   }
 
-  // 1. Procedural backdrop behind tiles (full 384x192 clipped to play area)
+  // 1. Procedural backdrop behind tiles (full 384x192 logical / 768x384 physical clipped to play area)
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, VIEW_W, PLAY_H);
   ctx.clip();
   drawBackdrop(ctx, level.id, VIEW_W, PLAY_H, time, room.seed);
 
-  // 2. Cached static 2.5D room geometry (back-wall pushback/AO, pilasters, walls, pillars, static slabs)
+  // 2. Cached static 2.5D room geometry at 2x (back-wall pushback/AO, pilasters, walls, pillars, static slabs)
   const cached = getStaticRoomLayers(level, room, theme);
   if (cached) {
-    ctx.drawImage(cached.baseCanvas, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(cached.baseCanvas, 0, 0, VIEW_W, PLAY_H);
   } else {
     drawStaticRoomBase(ctx, level, room, theme);
   }
 
-  // 3. Back-wall decor (torches/lamps with floor light pools, banners, signs, notes, 3D CRT, console)
+  // 3. Back-wall decor (torches/lamps with soft floor light pools, banners, signs, notes, 3D CRT, console)
   drawDecor(ctx, level, room, theme, time, level.id);
 
   // 4. Dynamic floor-plane objects (loose floors, plates, recessed exit doors, spikes, back frames of gates/slicers/mirror)
@@ -1742,10 +1417,10 @@ export function renderGame(ctx, game) {
     ctx.fillStyle = theme.floorFace;
     ctx.fillRect(dx, yF, dw, SLAB_FRONT_H);
     ctx.fillStyle = theme.floorEdgeBevel;
-    ctx.fillRect(dx, yF, dw, 1);
+    ctx.fillRect(dx, yF, dw, 0.75);
   }
 
-  // 7. Enemies, Celine NPC, and Player
+  // 7. Enemies, Celine NPC, and Player (articulated 2x IK figures)
   for (const enemy of enemies) {
     if (enemy.roomId !== room.id) continue;
     if (!enemy.alive && enemy.animT >= 1 && enemy.hiddenAfterDeath) continue;
@@ -1755,9 +1430,9 @@ export function renderGame(ctx, game) {
   drawCharacter(ctx, player, time);
 
   // 8. Foreground depth occluders: solid wall fronts + ceiling lip + foreground slab fronts
-  //    (so jumping heads pass behind overhead slab fronts, while active climbing/hanging ledge is never clipped)
   if (cached) {
-    ctx.drawImage(cached.fgCanvas, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(cached.fgCanvas, 0, 0, VIEW_W, PLAY_H);
   } else {
     drawStaticRoomFg(ctx, level, room, theme);
   }
@@ -1770,12 +1445,15 @@ export function renderGame(ctx, game) {
   // 9b. Climb cue: when the hero can climb from where he stands, mark the 3D ledge corner
   drawClimbCue(ctx, level, player, time);
 
-  // 10. Particles (sparks, dust, shatter)
+  // 10. Particles (sparks, dust, shatter — rounded crisp 2x motes)
   for (const pt of level.particles) {
     if (pt.roomId !== room.id) continue;
     ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
     ctx.fillStyle = pt.color;
-    ctx.fillRect(Math.round(pt.x), Math.round(pt.y), pt.size, pt.size);
+    const r = Math.max(0.6, pt.size * 0.55);
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 
@@ -1786,11 +1464,11 @@ export function renderGame(ctx, game) {
     const boxH = wrapped.length > 1 ? 26 : 18;
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = 'rgba(6, 9, 14, 0.88)';
+    ctx.fillStyle = 'rgba(6, 9, 14, 0.90)';
     ctx.fillRect(16, 5, VIEW_W - 32, boxH);
     ctx.strokeStyle = theme.floorTrim;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(16.5, 5.5, VIEW_W - 33, boxH - 1);
+    ctx.lineWidth = 0.75;
+    ctx.strokeRect(16.25, 5.25, VIEW_W - 32.5, boxH - 0.5);
     for (let i = 0; i < wrapped.length; i++) {
       const ly = wrapped.length > 1 ? 10 + i * 9 : 11;
       drawPixelText(ctx, wrapped[i], VIEW_W / 2, ly, { color: '#f3f1ea', align: 'center', shadow: '#05070a' });
@@ -1818,6 +1496,8 @@ export function renderGame(ctx, game) {
   } else if (mode === 'dead') {
     drawDeathOverlay(ctx, game);
   }
+
+  ctx.restore(); // end 2x transform
 }
 
 const CLIMB_CUE_STATES = new Set(['idle', 'run', 'run_start', 'skid', 'careful', 'turn', 'land', 'crouch']);
@@ -1967,25 +1647,56 @@ function drawDecor(ctx, level, room, theme, time, levelId) {
         ctx.fillStyle = '#fff5cc';
         ctx.fillRect(bx - 3, bfy - 24, 6, 2);
       } else {
-        // Classic Paradeplatz / Olten / Gotthard / Chillon warm wall sconce
-        const flick = Math.sin(time * 13 + d.col * 3) * 1.5;
+        // Classic Paradeplatz / Olten / Gotthard / Chillon warm wall sconce with soft multi-layer glow & teardrop flame
+        const flick = Math.sin(time * 13 + d.col * 3) * 1.4;
+        const sway = Math.sin(time * 9.5 + d.col * 5) * 0.7;
         if (hasFloorHere) {
-          drawFloorLightPool(ctx, cx, fy, `rgba(255, 195, 85, ${(0.22 + flick * 0.015).toFixed(2)})`, 'rgba(255, 120, 30, 0)');
+          drawFloorLightPool(ctx, cx, fy, `rgba(255, 195, 85, ${(0.24 + flick * 0.015).toFixed(2)})`, 'rgba(255, 120, 30, 0)', 22, 4.0);
         }
-        // Back wall iron mounting plate & angled bracket
-        ctx.fillStyle = '#292014';
-        ctx.fillRect(bx - 2, ty + 2, 4, 6);
-        ctx.fillStyle = '#5c4728';
-        ctx.fillRect(bx - 1, ty, 2, 7);
-        const g = ctx.createRadialGradient(bx, ty - 2, 1, bx, ty - 2, 20 + flick);
-        g.addColorStop(0, 'rgba(255, 200, 90, 0.35)');
+        // Wide soft ambient halo
+        const outerG = ctx.createRadialGradient(bx, ty - 2, 2, bx, ty - 2, 32 + flick);
+        outerG.addColorStop(0, 'rgba(255, 185, 75, 0.22)');
+        outerG.addColorStop(0.5, 'rgba(255, 130, 35, 0.08)');
+        outerG.addColorStop(1, 'rgba(255, 100, 20, 0)');
+        ctx.fillStyle = outerG;
+        ctx.beginPath();
+        ctx.arc(bx, ty - 2, 32 + flick, 0, Math.PI * 2);
+        ctx.fill();
+        // Back wall iron mounting plate & sculpted torch sconce cup
+        ctx.fillStyle = '#241c13';
+        ctx.fillRect(bx - 2, ty + 2, 4, 6.5);
+        ctx.fillStyle = '#6b5330';
+        ctx.fillRect(bx - 1, ty + 0.5, 2, 7);
+        ctx.fillStyle = '#8c6f3e';
+        ctx.fillRect(bx - 2.5, ty - 0.5, 5, 1.5);
+        // Inner warm core glow
+        const g = ctx.createRadialGradient(bx, ty - 2.5, 0.5, bx, ty - 2.5, 14 + flick * 0.6);
+        g.addColorStop(0, 'rgba(255, 225, 130, 0.48)');
+        g.addColorStop(0.55, 'rgba(255, 150, 40, 0.16)');
         g.addColorStop(1, 'rgba(255, 120, 30, 0)');
         ctx.fillStyle = g;
-        ctx.fillRect(bx - 22, ty - 24, 44, 44);
-        ctx.fillStyle = '#ff9824';
-        ctx.fillRect(bx - 2, ty - 4, 4, 4);
-        ctx.fillStyle = '#fff0a0';
-        ctx.fillRect(bx - 1, ty - 3, 2, 2);
+        ctx.beginPath();
+        ctx.arc(bx, ty - 2.5, 14 + flick * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        // Teardrop animated outer flame + bright inner flame + rising ember
+        ctx.fillStyle = '#ff8a1f';
+        ctx.beginPath();
+        ctx.moveTo(bx - 2.0, ty - 0.5);
+        ctx.quadraticCurveTo(bx - 2.2, ty - 3.6, bx + sway, ty - 6.2 - flick * 0.4);
+        ctx.quadraticCurveTo(bx + 2.2, ty - 3.6, bx + 2.0, ty - 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fff3ad';
+        ctx.beginPath();
+        ctx.moveTo(bx - 1.0, ty - 0.7);
+        ctx.quadraticCurveTo(bx - 1.1, ty - 2.6, bx + sway * 0.6, ty - 4.4 - flick * 0.25);
+        ctx.quadraticCurveTo(bx + 1.1, ty - 2.6, bx + 1.0, ty - 0.7);
+        ctx.closePath();
+        ctx.fill();
+        // Tiny rising ember spark
+        const emP = (time * 1.6 + d.col * 0.43) % 1;
+        ctx.fillStyle = `rgba(255, 210, 110, ${(1 - emP).toFixed(2)})`;
+        ctx.fillRect(bx + Math.sin(emP * 8 + d.col) * 2.2, ty - 6 - emP * 9, 0.75, 0.75);
       }
     } else if (d.type === 'crt') {
       // 1979 Reduit amber copper-line CRT terminal with 3D oblique cabinet sitting on top face
@@ -2189,7 +1900,7 @@ function drawDynamicRoomElements(ctx, level, room, theme, time) {
             sideCol
           );
         }
-        // Lit oblique top surface of plate
+        // Lit oblique top surface of plate + crisp 2x bevel & etched emblem
         fillQuad(
           ctx,
           insetL, pYF - lift,
@@ -2198,6 +1909,23 @@ function drawDynamicRoomElements(ctx, level, room, theme, time) {
           insetL + insetW, pYF - lift,
           topCol
         );
+        drawIsoLine(ctx, insetL, pYF - lift + 0.3, insetL + insetW, pYF - lift + 0.3, 'rgba(255,255,255,0.45)', 0.5);
+        // Subtle etched indicator on top face (diamond/bar/ring)
+        const pmx = insetL + insetW * 0.5 + dxS * 0.5;
+        const pmy = (pYF + pYB) * 0.5 - lift;
+        ctx.fillStyle = 'rgba(0,0,0,0.32)';
+        if (plate && plate.hold) {
+          ctx.strokeStyle = 'rgba(10,45,52,0.55)';
+          ctx.lineWidth = 0.65;
+          ctx.beginPath();
+          ctx.ellipse(pmx, pmy, 3.8, 1.3, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (ch === 'Q') {
+          drawIsoLine(ctx, pmx - 2.6, pmy - 0.9, pmx + 2.6, pmy + 0.9, 'rgba(85,12,18,0.65)', 0.75);
+          drawIsoLine(ctx, pmx - 2.6, pmy + 0.9, pmx + 2.6, pmy - 0.9, 'rgba(85,12,18,0.65)', 0.75);
+        } else {
+          ctx.fillRect(pmx - 3.5, pmy - 0.4, 7, 0.8);
+        }
         // Front face thickness
         ctx.fillStyle = faceCol;
         ctx.fillRect(insetL, pYF - lift, insetW, down ? 1 : 2);
@@ -2238,31 +1966,46 @@ function drawDynamicRoomElements(ctx, level, room, theme, time) {
         ];
         for (const s of spikeSpecs) {
           const sh = Math.max(2, Math.round(h * s.scale));
-          // Dark socket hole in the floor top face
-          ctx.fillStyle = 'rgba(4, 6, 9, 0.85)';
+          // Beveled recessed socket hole in the floor top face
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
           ctx.beginPath();
-          ctx.ellipse(s.sx + 2.2, s.sy, 2.8, 1.1, 0, 0, Math.PI * 2);
+          ctx.ellipse(s.sx + 2.2, s.sy + 0.35, 3.0, 1.2, 0, 0, Math.PI * 2);
           ctx.fill();
-          // Two-tone 3D faceted spike: lit left facet + shaded right facet
-          ctx.fillStyle = theme.spikeCol;
+          ctx.fillStyle = 'rgba(4, 6, 9, 0.88)';
+          ctx.beginPath();
+          ctx.ellipse(s.sx + 2.2, s.sy, 2.7, 1.05, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // 3-facet honed 2x metallic spike: bright bevel + mid face + shaded right facet
+          ctx.fillStyle = mixHex(theme.spikeCol, '#ffffff', 0.32);
           ctx.beginPath();
           ctx.moveTo(s.sx, s.sy);
           ctx.lineTo(s.sx + 2.2, s.sy - sh);
-          ctx.lineTo(s.sx + 2.2, s.sy);
+          ctx.lineTo(s.sx + 1.25, s.sy);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.fillStyle = theme.spikeCol;
+          ctx.beginPath();
+          ctx.moveTo(s.sx + 1.25, s.sy);
+          ctx.lineTo(s.sx + 2.2, s.sy - sh);
+          ctx.lineTo(s.sx + 2.45, s.sy);
           ctx.closePath();
           ctx.fill();
 
           ctx.fillStyle = spikeDark;
           ctx.beginPath();
-          ctx.moveTo(s.sx + 2.2, s.sy);
+          ctx.moveTo(s.sx + 2.45, s.sy);
           ctx.lineTo(s.sx + 2.2, s.sy - sh);
           ctx.lineTo(s.sx + 4.4, s.sy);
           ctx.closePath();
           ctx.fill();
 
-          // Sharp metallic tip glint
+          // Sharp metallic ridge highlight & tip glint
+          drawIsoLine(ctx, s.sx + 1.4, s.sy, s.sx + 2.2, s.sy - sh, 'rgba(255,255,255,0.65)', 0.5);
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(Math.round(s.sx + 1.8), Math.round(s.sy - sh), 1, Math.min(3, sh));
+          ctx.beginPath();
+          ctx.arc(s.sx + 2.2, s.sy - sh + 0.5, 0.65, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
@@ -2324,21 +2067,35 @@ function drawDynamicRoomElements(ctx, level, room, theme, time) {
         // Recessed threshold step shadow on floor top face
         fillQuad(ctx, dx - 2, yB + 2, dx, yB, dx + dw, yB, dx + dw - 2, yB + 2, 'rgba(0,0,0,0.46)');
 
-        // Sliding armored door leaf inside recess
+        // Sliding armored door leaf inside recess (2x recessed panels + rivets + Swiss medallion)
         const leafH = Math.round(dh * (1 - openAmt));
         if (leafH > 1) {
           ctx.fillStyle = theme.wallFill;
           ctx.fillRect(dx + 2, dy + 2, dw - 2, Math.max(1, leafH - 2));
+          if (leafH > 10) {
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = 0.6;
+            ctx.strokeRect(dx + 3.5, dy + 3.5, dw - 5, Math.max(2, leafH - 6.5));
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.beginPath();
+            ctx.moveTo(dx + 3.5, dy + 3.5);
+            ctx.lineTo(dx + dw - 1.5, dy + 3.5);
+            ctx.stroke();
+          }
           ctx.fillStyle = theme.exitFrame;
-          ctx.fillRect(dx + 3, dy + Math.max(2, leafH - 3), dw - 4, 2);
+          ctx.fillRect(dx + 2.5, dy + Math.max(2, leafH - 2.5), dw - 3, 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.fillRect(dx + 2.5, dy + Math.max(2, leafH - 2.5), dw - 3, 0.5);
           if (leafH > 18) {
             const emX = Math.round(dx + dw / 2 + 1);
             const emY = dy + 8;
-            ctx.fillStyle = '#c42b33';
+            ctx.fillStyle = '#181a1f';
+            ctx.fillRect(emX - 4.5, emY - 0.5, 9, 9);
+            ctx.fillStyle = '#c92830';
             ctx.fillRect(emX - 4, emY, 8, 8);
             ctx.fillStyle = '#f5f4ef';
-            ctx.fillRect(emX - 1, emY + 1, 2, 6);
-            ctx.fillRect(emX - 3, emY + 3, 6, 2);
+            ctx.fillRect(emX - 1, emY + 1.5, 2, 5);
+            ctx.fillRect(emX - 2.5, emY + 3, 5, 2);
           }
         }
       }
@@ -2446,34 +2203,49 @@ function drawRoomForegroundTraps(ctx, level, room, theme, time) {
       ctx.clip();
     }
 
-    // 4 heavy vertical dark-iron portcullis bars staggered across the full 9px oblique depth
+    // 4 heavy cylindrical-shaded vertical portcullis bars across the full 9px oblique depth
     const barFracs = [0.88, 0.62, 0.36, 0.12];
     for (const z of barFracs) {
-      const bx = Math.round(cx - 1 + z * ISO_DX);
-      const bTop = Math.round(topY + 4 + z * ISO_DY);
+      const bx = cx - 1 + z * ISO_DX;
+      const bTop = topY + 4 + z * ISO_DY;
       const bLen = Math.max(2, closedH - 4);
-      ctx.fillStyle = '#14191f';
-      ctx.fillRect(bx, bTop, 2, bLen);
+      ctx.fillStyle = '#12171d';
+      ctx.fillRect(bx, bTop, 2.2, bLen);
+      ctx.fillStyle = z < 0.5 ? theme.gateBar : mixHex(theme.gateBar, '#0d1015', 0.35);
+      ctx.fillRect(bx + 0.6, bTop, 1.2, bLen);
       ctx.fillStyle = z < 0.5 ? theme.gateHi : theme.gateBar;
-      ctx.fillRect(bx + 1, bTop, 1, bLen);
+      ctx.fillRect(bx + 1.3, bTop, 0.55, bLen);
     }
 
     // Slanted oblique structural cross-brace (when lowered enough)
     if (closedH > 18) {
       const midY = topY + Math.floor(closedH * 0.48);
-      drawIsoLine(ctx, cx - 2, midY + 1, cx + ISO_DX + 1, midY + 1 + ISO_DY, '#182028', 2.4);
-      drawIsoLine(ctx, cx - 2, midY, cx + ISO_DX + 1, midY + ISO_DY, theme.gateHi, 1);
+      drawIsoLine(ctx, cx - 2, midY + 1, cx + ISO_DX + 1, midY + 1 + ISO_DY, '#141a22', 2.6);
+      drawIsoLine(ctx, cx - 2, midY + 0.2, cx + ISO_DX + 1, midY + 0.2 + ISO_DY, theme.gateBar, 1.3);
+      drawIsoLine(ctx, cx - 2, midY - 0.3, cx + ISO_DX + 1, midY - 0.3 + ISO_DY, theme.gateHi, 0.6);
     }
 
-    // Heavy slanted bottom lock bar + sharp downward portcullis teeth seated in floor groove
+    // Heavy slanted bottom lock bar + faceted pointed portcullis teeth seated in floor groove
     const botY = topY + closedH - 1;
-    drawIsoLine(ctx, cx - 2, botY + 1, cx + ISO_DX + 1, botY + 1 + ISO_DY, '#182028', 2.6);
-    drawIsoLine(ctx, cx - 2, botY, cx + ISO_DX + 1, botY + ISO_DY, theme.gateHi, 1);
-    ctx.fillStyle = '#d4dde6';
+    drawIsoLine(ctx, cx - 2, botY + 1, cx + ISO_DX + 1, botY + 1 + ISO_DY, '#141a22', 2.8);
+    drawIsoLine(ctx, cx - 2, botY, cx + ISO_DX + 1, botY + ISO_DY, theme.gateHi, 0.9);
     for (const z of barFracs) {
-      const bx = Math.round(cx - 1 + z * ISO_DX);
-      const ty = Math.round(botY + 1 + z * ISO_DY);
-      ctx.fillRect(bx + 1, ty, 1, 3);
+      const bx = cx - 1 + z * ISO_DX;
+      const ty = botY + 0.8 + z * ISO_DY;
+      ctx.fillStyle = '#b9c6d4';
+      ctx.beginPath();
+      ctx.moveTo(bx + 0.2, ty);
+      ctx.lineTo(bx + 1.1, ty + 3.4);
+      ctx.lineTo(bx + 2.0, ty);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(bx + 0.5, ty);
+      ctx.lineTo(bx + 1.1, ty + 3.4);
+      ctx.lineTo(bx + 1.1, ty);
+      ctx.closePath();
+      ctx.fill();
     }
 
     // Thick 3D overhead lintel housing (extruded 9px right-side + front riveted face)
@@ -2673,7 +2445,7 @@ function drawItems(ctx, room, time) {
     // Rest item squarely on the floor's top face (slightly back from front edge)
     const x = Math.round(it.x + 1.5);
     const y = Math.round(it.y - 1);
-    const bob = Math.sin(time * 4 + it.col) * 0.7;
+    const bob = Math.sin(time * 4 + it.col) * 0.65;
 
     if (it.type === 'sword') {
       // Skewed contact shadow on top face
@@ -2681,74 +2453,137 @@ function drawItems(ctx, room, time) {
       ctx.transform(1, 0, ISO_DX / ISO_DY, 1, x + 0.5, y + 0.4);
       ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
       ctx.beginPath();
-      ctx.ellipse(0, 0, 11.5, 2.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 12.2, 2.3, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
-      // Low 3D stone plinth resting on the top face
-      fillQuad(ctx, x - 9, y - 1, x - 7, y - 4, x + 11, y - 4, x + 9, y - 1, '#5b4e38');
-      fillQuad(ctx, x + 9, y - 1, x + 11, y - 4, x + 11, y - 2, x + 9, y + 1, '#241e15');
-      ctx.fillStyle = '#3a3022';
-      ctx.fillRect(x - 9, y - 1, 18, 2);
+      // Stepped 3D stone plinth with velvet trim resting on top face
+      fillQuad(ctx, x - 9.5, y - 1, x - 7.5, y - 4, x + 11.5, y - 4, x + 9.5, y - 1, '#5e513b');
+      fillQuad(ctx, x + 9.5, y - 1, x + 11.5, y - 4, x + 11.5, y - 1.5, x + 9.5, y + 1.5, '#221c14');
+      ctx.fillStyle = '#3b3123';
+      ctx.fillRect(x - 9.5, y - 1, 19, 2.5);
+      ctx.fillStyle = 'rgba(255, 240, 200, 0.25)';
+      ctx.fillRect(x - 9.5, y - 1, 19, 0.5);
+      // Crimson velvet strip on plinth top
+      fillQuad(ctx, x - 7, y - 1.5, x - 5.8, y - 3.3, x + 9.2, y - 3.3, x + 8, y - 1.5, '#7a1c22');
 
-      // Guild Sabre lying across the plinth with golden hilt & glint
-      ctx.strokeStyle = '#eef5ff';
-      ctx.lineWidth = 1.6;
+      // Ceremonial Guild Sabre with fuller shade, gold knuckle-bow hilt, and diamond glint
+      const sy0 = y - 3.2 + bob * 0.35;
+      const sy1 = y - 6.4 + bob * 0.35;
+      ctx.strokeStyle = '#9db0c4';
+      ctx.lineWidth = 1.9;
       ctx.beginPath();
-      ctx.moveTo(x - 8, y - 3 + bob * 0.4);
-      ctx.lineTo(x + 10, y - 6 + bob * 0.4);
+      ctx.moveTo(x - 7.5, sy0);
+      ctx.quadraticCurveTo(x + 1.5, sy0 - 1.0, x + 10.5, sy1);
       ctx.stroke();
-      ctx.fillStyle = '#e0b341';
-      ctx.fillRect(x - 10, y - 5 + bob * 0.4, 3, 4);
-      ctx.fillStyle = '#fff0a8';
-      ctx.fillRect(x - 10, y - 5 + bob * 0.4, 1, 2);
-      if (Math.sin(time * 5) > 0.6) {
+      ctx.strokeStyle = '#f2f7ff';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(x - 7.5, sy0 - 0.45);
+      ctx.quadraticCurveTo(x + 1.5, sy0 - 1.45, x + 10.5, sy1 - 0.2);
+      ctx.stroke();
+      // Ornate gold D-guard hilt & pommel
+      ctx.strokeStyle = '#e5b847';
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.moveTo(x - 7.8, sy0 - 2.3);
+      ctx.lineTo(x - 7.0, sy0 + 2.1);
+      ctx.stroke();
+      ctx.strokeStyle = '#6b4c16';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x - 7.4, sy0);
+      ctx.lineTo(x - 10.6, sy0 + 0.6);
+      ctx.stroke();
+      ctx.strokeStyle = '#f7d979';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x - 7.0, sy0 + 2.0);
+      ctx.quadraticCurveTo(x - 9.5, sy0 + 2.6, x - 10.8, sy0 + 0.6);
+      ctx.stroke();
+      ctx.fillStyle = '#f2c94c';
+      ctx.beginPath();
+      ctx.arc(x - 10.8, sy0 + 0.6, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Shimmering 4-point diamond star glint
+      const gl = 0.5 + 0.5 * Math.sin(time * 5.2);
+      if (gl > 0.55) {
+        const sr = (gl - 0.55) * 8.5;
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(x + 3, y - 7, 2, 2);
+        ctx.beginPath();
+        ctx.moveTo(x + 3.5, sy1 - 0.5 - sr);
+        ctx.lineTo(x + 3.5 + sr * 0.25, sy1 - 0.5 - sr * 0.25);
+        ctx.lineTo(x + 3.5 + sr, sy1 - 0.5);
+        ctx.lineTo(x + 3.5 + sr * 0.25, sy1 - 0.5 + sr * 0.25);
+        ctx.lineTo(x + 3.5, sy1 - 0.5 + sr);
+        ctx.lineTo(x + 3.5 - sr * 0.25, sy1 - 0.5 + sr * 0.25);
+        ctx.lineTo(x + 3.5 - sr, sy1 - 0.5);
+        ctx.lineTo(x + 3.5 - sr * 0.25, sy1 - 0.5 - sr * 0.25);
+        ctx.closePath();
+        ctx.fill();
       }
     } else {
-      // Elixir flask sitting on the top face: small (crimson), large (gold-rimmed), poison (bluish)
+      // 2x Rounded Glass Elixir Flask sitting on top face: small (crimson), large (gold-rimmed), poison (cyan-blue)
       const isLarge = it.type === 'large_elixir';
       const isPoison = it.type === 'poison';
-      const fill = isPoison ? '#3a86e8' : '#e02f3f';
-      const dark = isPoison ? '#1e4a8a' : '#8a1824';
-      const hi = isPoison ? '#99d4ff' : '#ff9ca6';
-      const h = isLarge ? 9 : 6;
-      const w = isLarge ? 7 : 5;
+      const fill = isPoison ? '#3a86e8' : '#de2c3d';
+      const dark = isPoison ? '#1c4480' : '#851621';
+      const hi = isPoison ? '#b0e0ff' : '#ffa6b0';
+      const rx = isLarge ? 3.8 : 2.7;
+      const ry = isLarge ? 4.2 : 3.0;
+      const cy = y - ry + 0.2;
 
-      // Skewed floor contact shadow + subtle colored light pool on top face
+      // Skewed floor contact shadow + soft colored light pool on top face
       ctx.save();
       ctx.transform(1, 0, ISO_DX / ISO_DY, 1, x + 0.5, y + 0.5);
-      ctx.fillStyle = isPoison ? 'rgba(60,140,255,0.22)' : 'rgba(255,70,90,0.22)';
+      const lg = ctx.createRadialGradient(0, 0, 0.5, 0, 0, isLarge ? 9.5 : 7.0);
+      lg.addColorStop(0, isPoison ? 'rgba(65,155,255,0.34)' : 'rgba(255,70,90,0.34)');
+      lg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = lg;
+      ctx.scale(1, 0.32);
       ctx.beginPath();
-      ctx.ellipse(0, 0, isLarge ? 7.5 : 5.5, 2.2, 0, 0, Math.PI * 2);
+      ctx.arc(0, 0, isLarge ? 9.5 : 7.0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.38)';
+      ctx.fillStyle = 'rgba(0,0,0,0.40)';
       ctx.beginPath();
-      ctx.ellipse(0, 0, isLarge ? 4.2 : 3.2, 1.3, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, rx + 0.8, rx * 0.85, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
-      // 3D shaded cylindrical flask body
-      const fx = x - Math.floor(w / 2);
-      ctx.fillStyle = fill;
-      ctx.fillRect(fx, y - h, w, h);
-      // Shaded right side for cylindrical volume
+      // Glass body (shaded spherical/teardrop flask)
       ctx.fillStyle = dark;
-      ctx.fillRect(fx + w - 2, y - h, 2, h);
-      // Rounded shoulder + neck
-      ctx.fillStyle = '#d4dde6';
-      ctx.fillRect(x - 1, y - h - 2, 2, 2);
-      ctx.fillStyle = '#9aa8b8';
-      ctx.fillRect(x, y - h - 2, 1, 2);
-      // Specular highlight on lit left edge
-      ctx.fillStyle = hi;
-      ctx.fillRect(fx + 1, y - h + 1, 1, Math.max(2, h - 3));
-      // Large elixir gold ring
+      ctx.beginPath();
+      ctx.ellipse(x, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.ellipse(x - 0.5, cy, rx * 0.86, ry * 0.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Glass neck & cork stopper
+      ctx.fillStyle = '#c8d6e4';
+      ctx.fillRect(x - 1.15, cy - ry - 1.8, 2.3, 2.2);
+      ctx.fillStyle = '#8b6844';
+      ctx.fillRect(x - 0.85, cy - ry - 2.8, 1.7, 1.2);
+      // Curved glass specular highlight
+      ctx.strokeStyle = hi;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(x - 0.2, cy, rx * 0.62, Math.PI * 0.95, Math.PI * 1.48);
+      ctx.stroke();
+      // Large elixir ornate gold collar + bright glint
       if (isLarge) {
         ctx.fillStyle = '#f2c94c';
-        ctx.fillRect(fx, y - h, w, 1);
+        ctx.fillRect(x - 1.7, cy - ry - 0.3, 3.4, 1.0);
+        ctx.fillStyle = '#fff5c2';
+        ctx.fillRect(x - 1.4, cy - ry - 0.3, 1.4, 0.45);
       }
+      // Subtle animated inner shimmer bubble
+      const bY = cy + ry * 0.3 - ((time * 4 + it.col) % (ry * 0.9));
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.beginPath();
+      ctx.arc(x + 0.4, bY, 0.55, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }
@@ -2894,20 +2729,26 @@ function drawHUD(ctx, game) {
   ctx.fillStyle = '#252b36';
   ctx.fillRect(0, y0, VIEW_W, 1);
 
-  // Left: Player health pips (Swiss red squares with white cross)
+  // Left: Player health pips (beveled Swiss red squares with crisp white cross)
   const startX = 8;
   const pipY = y0 + 8;
   for (let i = 0; i < player.maxHp; i++) {
     const px = startX + i * 11;
     if (i < player.hp) {
-      ctx.fillStyle = '#d62828';
+      ctx.fillStyle = '#99181b';
       ctx.fillRect(px, pipY, 8, 8);
+      ctx.fillStyle = '#d9282c';
+      ctx.fillRect(px, pipY, 8, 7);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(px, pipY, 8, 0.75);
       ctx.fillStyle = '#f5f4ef';
-      ctx.fillRect(px + 3, pipY + 2, 2, 4);
-      ctx.fillRect(px + 2, pipY + 3, 4, 2);
+      ctx.fillRect(px + 3, pipY + 1.75, 2, 4.5);
+      ctx.fillRect(px + 1.75, pipY + 3, 4.5, 2);
     } else {
+      ctx.fillStyle = 'rgba(40, 18, 22, 0.5)';
+      ctx.fillRect(px + 0.5, pipY + 0.5, 7, 7);
       ctx.strokeStyle = '#633036';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 0.75;
       ctx.strokeRect(px + 0.5, pipY + 0.5, 7, 7);
     }
   }
@@ -3064,7 +2905,7 @@ function renderTitle(ctx, game) {
   }
 
   // Controls footer (crisp 2-line pixel readout)
-  drawPixelText(ctx, 'ARROWS: MOVE/JUMP/CLIMB  SHIFT: CAREFUL/HANG/STRIKE  UP: PARRY', VIEW_W / 2, 192, {
+  drawPixelText(ctx, 'ARROWS: MOVE/JUMP/CLIMB  SPACE: USE/CAREFUL/HANG/STRIKE  UP: PARRY', VIEW_W / 2, 192, {
     color: '#c4ccd9',
     align: 'center',
     baseline: 'middle',

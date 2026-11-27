@@ -1,25 +1,36 @@
 // src/main.js
-// Bootstrapper: integer/letterboxed canvas scaling at 384x216, fixed-step animation loop.
+// Bootstrapper: 2x native canvas (768x432) for logical 384x216 world, crisp scaling, fixed-step loop.
 
 import { VIEW_W, VIEW_H } from './level.js';
+import { RENDER_SCALE } from './render.js';
 import { Input } from './input.js';
 import { AudioEngine } from './audio.js';
 import { Game } from './game.js';
 
+const RENDER_W = VIEW_W * RENDER_SCALE;
+const RENDER_H = VIEW_H * RENDER_SCALE;
+
 const canvas = document.getElementById('game-canvas');
-canvas.width = VIEW_W;
-canvas.height = VIEW_H;
+canvas.width = RENDER_W;
+canvas.height = RENDER_H;
 
 function resizeCanvas() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const intScale = Math.floor(Math.min(vw / VIEW_W, vh / VIEW_H));
-  let w, h;
-  if (intScale >= 1) {
-    // True integer scaling for razor-sharp pixel art & bitmap typography
-    w = VIEW_W * intScale;
-    h = VIEW_H * intScale;
-  } else {
+  const dpr = window.devicePixelRatio || 1;
+  let w, h, exactPixel = false;
+
+  if (vw >= RENDER_W && vh >= RENDER_H && Number.isInteger(dpr)) {
+    // Prefer exact integer physical-pixel scaling of the 768x432 canvas
+    const physScale = Math.floor(Math.min((vw * dpr) / RENDER_W, (vh * dpr) / RENDER_H));
+    if (physScale >= 1) {
+      w = Math.round((RENDER_W * physScale) / dpr);
+      h = Math.round((RENDER_H * physScale) / dpr);
+      exactPixel = true;
+    }
+  }
+
+  if (!exactPixel) {
     const aspect = VIEW_W / VIEW_H;
     if (vw / vh > aspect) {
       h = vh;
@@ -29,8 +40,10 @@ function resizeCanvas() {
       h = Math.floor(w / aspect);
     }
   }
+
   canvas.style.width = `${w}px`;
   canvas.style.height = `${h}px`;
+  canvas.style.imageRendering = exactPixel ? 'pixelated' : 'auto';
 }
 
 window.addEventListener('resize', resizeCanvas);
