@@ -122,6 +122,9 @@ export const level6 = {
         '___L__C_____',
         '##___#######',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       decor: [
         { col: 3, row: 1, type: 'torch' },
       ],

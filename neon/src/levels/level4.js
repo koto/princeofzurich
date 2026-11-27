@@ -70,6 +70,9 @@ export const level4 = {
         '______.____G',
         '####__P_####',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 6, row: 3, targetId: 'l4_g_spill', action: 'open', hold: true },
       ],
@@ -136,6 +139,9 @@ export const level4 = {
         '#___._______',
         '___L___^____',
         '##____######',
+      ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
       ],
       decor: [
         { col: 9, row: 1, type: 'torch' },

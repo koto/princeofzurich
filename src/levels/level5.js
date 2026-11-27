@@ -43,6 +43,9 @@ export const level5 = {
         '_____P____G_',
         '############',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 5, row: 2, targetId: 'l5_g_sluice', action: 'open', hold: true },
       ],
@@ -128,6 +131,7 @@ export const level5 = {
         '##____######',
       ],
       items: [
+        { col: 1, row: 2, type: 'small_elixir' },
         { col: 9, row: 0, type: 'large_elixir' },
       ],
       decor: [

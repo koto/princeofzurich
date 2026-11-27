@@ -41,6 +41,9 @@ export const level3 = {
         '____..______',
         '###__.######',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       decor: [
         { col: 2, row: 2, type: 'torch' },
         { col: 9, row: 2, type: 'torch' },
@@ -190,6 +193,9 @@ export const level3 = {
         '#__P___.___#',
         '____..______',
         '###____#####',
+      ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
       ],
       plates: [
         { col: 3, row: 1, targetId: 'l3_exit', action: 'open' },

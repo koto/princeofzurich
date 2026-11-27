@@ -65,6 +65,9 @@ export const level2 = {
         '____..______',
         '###__.######',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       decor: [
         { col: 2, row: 2, type: 'torch' },
         { col: 9, row: 2, type: 'torch' },
@@ -123,6 +126,9 @@ export const level2 = {
         '___.___L___#',
         '____Q__Q__GP',
         '######___###',
+      ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
       ],
       plates: [
         { col: 4, row: 0, targetId: 'l2_g_gantry', action: 'open' },
