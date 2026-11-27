@@ -117,6 +117,7 @@ export class Player {
   die(reason = 'PRINZ HAS FALLEN') {
     if (!this.alive) return;
     if (this.godMode) {
+      this.hurtFlash = 0.25;
       // In god mode, recover safely if bottomless fall
       if (reason === 'bottomless') {
         this.roomId = this.lastSafePos.roomId;
@@ -126,7 +127,15 @@ export class Player {
         this.vy = 0;
         this.vx = 0;
         this.grounded = true;
+        this.fallStartY = this.y;
         this.enterState('idle', 0.2);
+      } else if (reason === 'fall' || (this.state === 'fall' && this.grounded)) {
+        // Recover from a fatal fall or falling onto spikes instead of looping in 'fall' forever
+        this.vy = 0;
+        this.vx = 0;
+        this.grounded = true;
+        this.fallStartY = this.y;
+        this.enterState('hard_land', 0.34);
       }
       return;
     }
