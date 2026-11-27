@@ -82,6 +82,9 @@ export const level10 = {
         '____..____GP',
         '###____#####',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 3, row: 1, targetId: 'l10_g_dome', action: 'open' },
         { col: 11, row: 2, targetId: 'l10_g_dome', action: 'open' },

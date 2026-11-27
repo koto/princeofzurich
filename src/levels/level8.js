@@ -83,6 +83,9 @@ export const level8 = {
         '____..____GP',
         '###__.######',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 3, row: 1, targetId: 'l8_g_rack', action: 'open' },
         { col: 11, row: 2, targetId: 'l8_g_rack', action: 'open' },
@@ -176,6 +179,9 @@ export const level8 = {
         '#__......__#',
         '____LLL_____',
         '###___..####',
+      ],
+      items: [
+        { col: 9, row: 2, type: 'small_elixir' },
       ],
       enemies: [
         {

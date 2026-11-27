@@ -29,7 +29,7 @@ const ICE_SKID_TIME = 0.7;   // glacier ice: ~a full tile
 const COYOTE_TIME = 0.1;     // s after running off an edge in which Up still launches a running jump
 
 export class Player {
-  constructor(startDef, maxHp = 3) {
+  constructor(startDef, maxHp = 4) {
     this.roomId = startDef.room;
     this.row = startDef.row;
     this.x = tileCenterX(startDef.col);

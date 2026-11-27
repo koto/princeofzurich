@@ -124,6 +124,9 @@ export const level1 = {
         '#_________GP',
         '############',
       ],
+      items: [
+        { col: 2, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 7, row: 1, targetId: 'l1_g_timed', action: 'open' },
         { col: 11, row: 2, targetId: 'l1_g_timed', action: 'open' },
@@ -172,6 +175,9 @@ export const level1 = {
         '#____P_.___#',
         '____________',
         '############',
+      ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
       ],
       plates: [
         { col: 5, row: 1, targetId: 'l1_exit', action: 'open' },
