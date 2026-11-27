@@ -93,6 +93,9 @@ export const level7 = {
         '_____Q____GP',
         '############',
       ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
+      ],
       plates: [
         { col: 3, row: 0, targetId: 'l7_g_mint', action: 'open' },
         { col: 5, row: 2, targetId: 'l7_g_mint', action: 'close' },
@@ -203,6 +206,9 @@ export const level7 = {
         '#_____._____',
         '__C___.._L__',
         '#####______#',
+      ],
+      items: [
+        { col: 1, row: 2, type: 'small_elixir' },
       ],
       decor: [
         { col: 7, row: 1, type: 'torch' },

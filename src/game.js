@@ -28,7 +28,7 @@ export class Game {
     this.mode = 'title'; // 'title'|'level_select'|'intro'|'playing'|'paused'|'dead'|'interlude'|'victory'|'timeout'
     this.levelIndex = 0;
     this.timeRemaining = TOTAL_TIME_SEC;
-    this.playerMaxHp = 3;
+    this.playerMaxHp = 4;
 
     this.level = null;
     this.player = null;
@@ -74,7 +74,7 @@ export class Game {
       if (Number.isFinite(n)) {
         // Support 1..10 as Level 1..10, and 0 as Level 1
         const idx = n >= 1 && n <= LEVELS.length ? n - 1 : Math.max(0, Math.min(LEVELS.length - 1, n));
-        this.playerMaxHp = 3 + Math.min(3, Math.floor(idx / 3));
+        this.playerMaxHp = 4 + Math.min(3, Math.floor(idx / 3));
         this.startLevel(idx, false);
         return;
       }
@@ -150,7 +150,7 @@ export class Game {
 
   startNewGame() {
     this.timeRemaining = TOTAL_TIME_SEC;
-    this.playerMaxHp = 3;
+    this.playerMaxHp = 4;
     this._syncFiredMilestones();
     this.introIndex = 0;
     this.cardQueue = INTRO_CARDS;
@@ -166,7 +166,7 @@ export class Game {
       return;
     }
     this.timeRemaining = this.savedGame.timeRemaining;
-    this.playerMaxHp = this.savedGame.maxHp || 3;
+    this.playerMaxHp = Math.max(4, this.savedGame.maxHp || 4);
     this._syncFiredMilestones();
     this.audio.play('ui');
     this.startLevel(this.savedGame.levelIndex, true);
@@ -181,7 +181,7 @@ export class Game {
   startSelectedLevel(idx) {
     const clamped = Math.max(0, Math.min(LEVELS.length - 1, idx));
     this.timeRemaining = TOTAL_TIME_SEC;
-    this.playerMaxHp = 3 + Math.min(3, Math.floor(clamped / 3));
+    this.playerMaxHp = 4 + Math.min(3, Math.floor(clamped / 3));
     this._syncFiredMilestones();
     this.audio.play('ui');
     this.startLevel(clamped, false);
