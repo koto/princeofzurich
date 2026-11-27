@@ -543,7 +543,7 @@ export class Game {
       this.startLevel(this.levelIndex, false);
       return;
     }
-    if (this.input.spacePressed) {
+    if (this.input.timePressed) {
       const m = Math.floor(this.timeRemaining / 60);
       const s = Math.floor(this.timeRemaining % 60);
       const fmt = CLOCK_CHECK_LINES[this.clockCheckCount++ % CLOCK_CHECK_LINES.length];

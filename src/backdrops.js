@@ -61,17 +61,31 @@ function createOffscreen(w, h) {
   return null;
 }
 
-function getCachedLayer(key, w, h, builder) {
+function getContextScale(ctx) {
+  if (ctx && typeof ctx.getTransform === 'function') {
+    const m = ctx.getTransform();
+    const s = Math.hypot(m.a, m.b);
+    if (Number.isFinite(s) && s >= 0.5) return Math.max(1, Math.min(4, Math.round(s * 2) / 2));
+  }
+  return 1;
+}
+
+function getCachedLayer(key, w, h, scale, builder) {
   let entry = staticCache.get(key);
   if (entry) return entry;
 
-  const off = createOffscreen(w, h);
+  const pw = Math.max(1, Math.round(w * scale));
+  const ph = Math.max(1, Math.round(h * scale));
+  const off = createOffscreen(pw, ph);
   if (!off) {
     // Fallback if neither OffscreenCanvas nor document exists
     return { canvas: null, meta: builder(null, w, h) };
   }
 
-  off.ctx.imageSmoothingEnabled = false;
+  off.ctx.imageSmoothingEnabled = scale > 1;
+  if (scale !== 1) {
+    off.ctx.scale(scale, scale);
+  }
   const meta = builder(off.ctx, w, h) || {};
   entry = { canvas: off.canvas, meta };
 
@@ -2484,16 +2498,18 @@ export function drawBackdrop(ctx, levelIndex, w, h, t = 0, roomSeed = 0) {
   const count = LEVEL_BUILDERS.length;
   const lvl = ((Math.floor(Number(levelIndex) || 0) % count) + count) % count;
   const time = Number.isFinite(t) ? t : 0;
+  const scale = getContextScale(ctx);
   const seedHash = hashSeed(lvl, roomSeed);
-  const cacheKey = `lvl:${lvl}:${seedHash}:${w}x${h}`;
+  const cacheKey = `lvl:${lvl}:${seedHash}:${w}x${h}@${scale}`;
 
-  const entry = getCachedLayer(cacheKey, w, h, (offCtx, cw, ch) =>
+  const entry = getCachedLayer(cacheKey, w, h, scale, (offCtx, cw, ch) =>
     LEVEL_BUILDERS[lvl](offCtx, cw, ch, seedHash)
   );
 
   ctx.save();
   if (entry.canvas) {
-    ctx.drawImage(entry.canvas, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(entry.canvas, 0, 0, w, h);
   } else {
     LEVEL_BUILDERS[lvl](ctx, w, h, seedHash);
   }
@@ -2514,15 +2530,17 @@ export function drawTitleBackdrop(ctx, w, h, t = 0, opts = {}) {
   if (!ctx || w <= 0 || h <= 0) return;
   const showClock = opts.showClock !== false;
   const time = Number.isFinite(t) ? t : 0;
-  const cacheKey = `title:${showClock ? 'clk' : 'noclk'}:${w}x${h}`;
+  const scale = getContextScale(ctx);
+  const cacheKey = `title:${showClock ? 'clk' : 'noclk'}:${w}x${h}@${scale}`;
 
-  const entry = getCachedLayer(cacheKey, w, h, (offCtx, cw, ch) =>
+  const entry = getCachedLayer(cacheKey, w, h, scale, (offCtx, cw, ch) =>
     buildTitleStatic(offCtx, cw, ch, showClock)
   );
 
   ctx.save();
   if (entry.canvas) {
-    ctx.drawImage(entry.canvas, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(entry.canvas, 0, 0, w, h);
   } else {
     buildTitleStatic(ctx, w, h, showClock);
   }

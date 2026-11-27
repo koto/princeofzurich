@@ -64,49 +64,49 @@ export const LEVEL_INTROS = [
     title: 'LEVEL 3: GOTTHARD REDUIT',
     subtitle: 'URI / TICINO (2,100M) - 23:12',
     shortName: 'GOTTHARD REDUIT',
-    music: 'level1',
+    music: 'level2',
   },
   {
     title: 'LEVEL 4: GRANDE DIXENCE DAM',
     subtitle: 'VALAIS (2,365M) - 23:19',
     shortName: 'GRANDE DIXENCE DAM',
-    music: 'level2',
+    music: 'level3',
   },
   {
     title: 'LEVEL 5: CHILLON VIADUCT',
     subtitle: 'MONTREUX, VAUD (372M) - 23:25',
     shortName: 'CHILLON VIADUCT',
-    music: 'level2',
+    music: 'level4',
   },
   {
     title: 'LEVEL 6: CERN RING SECTOR 4',
     subtitle: 'MEYRIN, GENEVA (430M) - 23:31',
     shortName: 'CERN RING SECTOR 4',
-    music: 'level2',
+    music: 'level5',
   },
   {
     title: 'LEVEL 7: BUNDESHAUS ARCHIVE',
     subtitle: 'BERN (542M) - 23:38',
     shortName: 'BUNDESHAUS ARCHIVE',
-    music: 'level0',
+    music: 'level6',
   },
   {
     title: 'LEVEL 8: EIGERWAND GALLERY',
     subtitle: 'NORTH FACE (2,865M) - 23:44',
     shortName: 'EIGERWAND GALLERY',
-    music: 'level4',
+    music: 'level7',
   },
   {
     title: 'LEVEL 9: JUNGFRAU ICE PALACE',
     subtitle: 'ALETSCH GLACIER (3,454M) - 23:50',
     shortName: 'JUNGFRAU ICE PALACE',
-    music: 'level3',
+    music: 'level8',
   },
   {
     title: 'LEVEL 10: SPHINX OBSERVATORY',
     subtitle: 'JUNGFRAUJOCH (3,571M) - 23:55',
     shortName: 'SPHINX OBSERVATORY',
-    music: 'level4',
+    music: 'level9',
   },
 ];
 
@@ -313,7 +313,7 @@ export const DEATH_LINES = [
 ];
 
 export const CAUSE_DEATH_LINES = {
-  spikes: 'SHIFT-STEP WAS IN THE MANUAL.',
+  spikes: 'SPACE-STEP WAS IN THE MANUAL.',
   slicer: 'CLEANLY AUDITED INTO TWO HALVES.',
   fall: 'UNSCHEDULED VERTICAL DESCENT.',
   poison: 'IT SAID DO NOT DRINK IN FOUR LANGUAGES.',

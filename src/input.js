@@ -5,7 +5,7 @@ const TRACKED_CODES = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
   'KeyA', 'KeyD', 'KeyW', 'KeyS',
   'ShiftLeft', 'ShiftRight',
-  'Space', 'Enter', 'Escape', 'KeyR', 'KeyM',
+  'Space', 'Enter', 'Escape', 'KeyR', 'KeyM', 'KeyT',
 ]);
 
 const BUFFER_TTL = 0.2;
@@ -60,7 +60,7 @@ function actionForCode(code) {
   if (code === 'ArrowDown' || code === 'KeyS') return 'down';
   if (code === 'ArrowLeft' || code === 'KeyA') return 'left';
   if (code === 'ArrowRight' || code === 'KeyD') return 'right';
-  if (code === 'ShiftLeft' || code === 'ShiftRight') return 'shift';
+  if (code === 'Space' || code === 'ShiftLeft' || code === 'ShiftRight') return 'shift';
   return null;
 }
 
@@ -516,14 +516,15 @@ export class Input {
   get right() { return this._held('ArrowRight', 'KeyD'); }
   get up() { return this._held('ArrowUp', 'KeyW'); }
   get downKey() { return this._held('ArrowDown', 'KeyS'); }
-  get shift() { return this._held('ShiftLeft', 'ShiftRight'); }
+  get shift() { return this._held('Space', 'ShiftLeft') || this._held('ShiftRight', 'Space'); }
 
   get leftPressed() { return this.pressed.has('ArrowLeft') || this.pressed.has('KeyA'); }
   get rightPressed() { return this.pressed.has('ArrowRight') || this.pressed.has('KeyD'); }
   get upPressed() { return this.pressed.has('ArrowUp') || this.pressed.has('KeyW'); }
   get downPressed() { return this.pressed.has('ArrowDown') || this.pressed.has('KeyS'); }
-  get shiftPressed() { return this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'); }
+  get shiftPressed() { return this.pressed.has('Space') || this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'); }
   get spacePressed() { return this.pressed.has('Space'); }
+  get timePressed() { return this.pressed.has('KeyT'); }
   get enterPressed() { return this.pressed.has('Enter'); }
   get escPressed() { return this.pressed.has('Escape'); }
   get restartPressed() { return this.pressed.has('KeyR'); }
