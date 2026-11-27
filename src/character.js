@@ -452,12 +452,14 @@ function makePose(o = {}) {
     rHandY: o.rHandY ?? -14.8,
     rElbowBend: o.rElbowBend ?? 1,
 
+    fkArms: o.fkArms ?? null, // Optional direct FK arms { rUpper, rElbow, lUpper, lElbow } (bypasses IK during run!)
     swordAngle: o.swordAngle ?? 98,
     swordVisibleOverride: o.swordVisibleOverride ?? null, // null = follow ent.swordDrawn, true/false = force
     sheatheSlide: o.sheatheSlide ?? 0, // 0 = full length, 0..1 = sliding into scabbard
     heldFlask: o.heldFlask ?? null,
     lungeSlash: o.lungeSlash ?? 0,
     clampFeet: o.clampFeet ?? true,
+    faceYaw: o.faceYaw ?? 1, // +1 = facing forward (+x), 0 = front-facing toward camera, -1 = facing backward (-x)
   };
 }
 
@@ -489,18 +491,292 @@ function blendPose(a, b, t) {
     rHandY: lerp(a.rHandY, b.rHandY, u),
     rElbowBend: u < 0.5 ? a.rElbowBend : b.rElbowBend,
 
+    fkArms: (a.fkArms && b.fkArms) ? {
+      rUpper: lerp(a.fkArms.rUpper, b.fkArms.rUpper, u),
+      rElbow: lerp(a.fkArms.rElbow, b.fkArms.rElbow, u),
+      lUpper: lerp(a.fkArms.lUpper, b.fkArms.lUpper, u),
+      lElbow: lerp(a.fkArms.lElbow, b.fkArms.lElbow, u),
+    } : null,
     swordAngle: angleLerp(a.swordAngle, b.swordAngle, u),
     swordVisibleOverride: b.swordVisibleOverride,
     sheatheSlide: b.sheatheSlide,
     heldFlask: b.heldFlask,
     lungeSlash: b.lungeSlash,
     clampFeet: b.clampFeet,
+    faceYaw: lerp(a.faceYaw ?? 1, b.faceYaw ?? 1, u),
   };
 }
 
-// ---------------------------------------------------------------------------
-// Base En-Garde Fencing Pose (customized subtly by archetype!)
-// ---------------------------------------------------------------------------
+// Helper: compute exact elbow & wrist joints from shoulder using authentic FK angles
+// upperDeg: 0 = straight down (+y), + = forward (+x), - = backward (-x)
+// elbowFlexDeg: bend angle at elbow (80..100 deg = compact athletic runner's bend forward)
+function fkArmJoints(shoulderX, shoulderY, upperDeg, elbowFlexDeg, L1 = 5.0, L2 = 4.3) {
+  const r1 = degRad(upperDeg);
+  const r2 = degRad(upperDeg + elbowFlexDeg);
+  const mid = {
+    x: shoulderX + Math.sin(r1) * L1,
+    y: shoulderY + Math.cos(r1) * L1,
+  };
+  const end = {
+    x: mid.x + Math.sin(r2) * L2,
+    y: mid.y + Math.cos(r2) * L2,
+  };
+  return { mid, end };
+}
+
+function fkArmHand(shoulderX, shoulderY, upperDeg, elbowFlexDeg, L1 = 5.0, L2 = 4.3) {
+  return fkArmJoints(shoulderX, shoulderY, upperDeg, elbowFlexDeg, L1, L2).end;
+}
+
+// Helper: compute exact ankle target from hip using authentic FK leg angles
+// hipDeg: 0 = straight down (+y), + = thigh forward (+x), - = thigh extended behind (-x)
+// kneeFlexDeg: flexion of shin behind thigh (0 = straight, 90 = right angle, 125 = heel-to-buttock)
+function fkLegAnkle(hipX, hipY, hipDeg, kneeFlexDeg, L1 = 7.3, L2 = 7.2) {
+  const r1 = degRad(hipDeg);
+  const r2 = degRad(hipDeg - kneeFlexDeg);
+  const kx = hipX + Math.sin(r1) * L1;
+  const ky = hipY + Math.cos(r1) * L1;
+  return {
+    x: kx + Math.sin(r2) * L2,
+    y: ky + Math.cos(r2) * L2,
+  };
+}
+
+// Exact lowest Y offset below ankle for a profile boot rotated by angleDeg (matches drawBoot vertices!)
+// Guarantees ZERO floor penetration at heel-strike (a < 0) and toe-off (a > 0)!
+function bootLowestOffsetY(angleDeg, hS = 1.0) {
+  const rad = degRad(angleDeg);
+  const s = Math.sin(rad);
+  const c = Math.cos(rad);
+  const ah = 1.5 * hS;
+  const yHeel = -1.40 * s + ah * c;
+  const yBall =  2.20 * s + ah * c;
+  const yToe  =  3.55 * s + (ah - 0.15) * c;
+  return Math.max(ah, yHeel, yBall, yToe);
+}
+
+// Periodic Catmull-Rom spline over evenly spaced keyframes [v0, v1, ..., v_{N-1}] for t in [0, 1)
+function samplePeriodicSpline(vals, t01) {
+  const n = vals.length;
+  const u = (((t01 % 1) + 1) % 1) * n;
+  const i1 = Math.floor(u) % n;
+  const f = u - Math.floor(u);
+  const i0 = (i1 - 1 + n) % n;
+  const i2 = (i1 + 1) % n;
+  const i3 = (i1 + 2) % n;
+  const p0 = vals[i0];
+  const p1 = vals[i1];
+  const p2 = vals[i2];
+  const p3 = vals[i3];
+  const f2 = f * f;
+  const f3 = f2 * f;
+  return 0.5 * (
+    (2 * p1) +
+    (-p0 + p2) * f +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2 +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * f3
+  );
+}
+
+// Exact in-game horizontal travel per full 2-step run cycle (gameplay constants untouched)
+// RUN_SPEED = 104 px/s * RUN_CYCLE_DUR = 0.42s = 43.68 logical px per cycle!
+const RUN_CYCLE_DIST = 104 * 0.42; // 43.68 logical px
+
+// Canonical 6-phase per-step pelvis height (phase-aligned with Contact at F6/F12, Mid-Stance LOWEST at F7/F1,
+// Drive at F8/F2, Toe-Off at F9/F3, Early Flight at F10/F4, Mid-Flight PEAK at F11/F5):
+//   0/6 (F12, F6): Initial Contact (-15.00) -> flexed shock-absorbing knee, foot on ground line close under COM!
+//   1/6 (F1,  F7): Mid-Stance      (-14.48) -> LOWEST body point (clear athletic knee give & weight absorption!)
+//   2/6 (F2,  F8): Drive           (-15.08) -> rising powerfully
+//   3/6 (F3,  F9): Toe-Off         (-15.62) -> crisp diagonal triple extension
+//   4/6 (F4, F10): Early Flight    (-16.58) -> airborne #1!
+//   5/6 (F5, F11): Mid-Flight Peak (-17.02) -> PEAK AIRBORNE APEX! (both feet well off ground, lead knee bent ~40°!)
+const RUN_PELVIS_Y_HALF = [-15.05, -14.68, -15.18, -16.12, -16.68, -17.05];
+
+// Canonical 12-phase joint-angle keyframes for ONE leg (indexed by leg-local phase tLeg = 0 at Contact):
+//   0 (0/12, F12/F6): Contact      1 (1/12, F1/F7): Mid-Stance    2 (2/12, F2/F8): Drive         3 (3/12, F3/F9): Toe-Off
+//   4 (4/12, F4/F10): Early Flight 5 (5/12, F5/F11): Mid-Flight   6 (6/12, F6/F12): Opp Contact  7 (7/12, F7/F1): Opp Mid-Stance
+//   8 (8/12, F8/F2):  Opp Drive    9 (9/12, F9/F3): Opp Toe-Off  10 (10/12, F10/F4): Lead Flight 11 (11/12, F11/F5): Mid-Flight Lead
+const RUN_SWING_HIP_DEG   = [ 16,  10,  -8, -22, -25, -18,  -4,  24,  48,  65,  58,  42];
+const RUN_SWING_KNEE_DEG  = [ 28,  40,  22,  12,  72, 108, 126, 122, 100,  80,  56,  42];
+// Anatomical shin-to-foot interior ankle angle (90° = neutral perpendicular, 115-130° = relaxed plantar-flexed):
+//   - Toe-off (3): plantar-flexed (~110°) with toe last to leave ground
+//   - Folded recovery (4-7): relaxed plantar-flexed (122-126°), toes pointing back & down, sole facing back/up!
+//   - Knee drive -> landing prep (8-11): smoothly dorsiflexes back to ~88-90° ready for midfoot strike!
+const RUN_SWING_ANKLE_INT = [ 90,  90,  96, 112, 124, 126, 125, 122, 108,  96,  90,  88];
+
+// Convert anatomical shin-to-foot interior angle (90° = neutral, 120° = relaxed plantar-flexed)
+// into drawBoot's world rotation angle (0° = horizontal +x, + = clockwise toe-down)
+function ankleInteriorToBootAngle(shinFromDownDeg, ankleInteriorDeg) {
+  return ankleInteriorDeg - 90 - shinFromDownDeg;
+}
+
+// Subtle symmetrical hip yaw (indexed by leg-local phase, keeping hip joint tight inside pelvis!)
+const RUN_HIP_YAW = [0.18, 0.08, -0.06, -0.18, -0.18, -0.08, -0.18, -0.08, 0.06, 0.18, 0.18, 0.08];
+
+// Pure sinusoidal antiphase FK run arm driver (ZERO 4-frame plateau!):
+//   - Forward peak (F4-5 near, F10-11 far): upper arm +22.5°, elbow CLOSED to ~64° interior (116° flex),
+//     so forearm points ~49° up-and-forward and fist sits compactly at sternum/upper chest below chin (<= 0.85 L_fore ahead)!
+//   - Back peak (F10-11 near, F4-5 far): upper arm -56°, elbow OPENED to ~106° interior (74° flex),
+//     so elbow protrudes clearly behind torso back line and wrist sits cleanly beside/behind hip!
+//   - Smooth sinusoidal breathing across all 12 frames; zero crossing between F1 & F2 (and F7 & F8).
+function evalRunArmAngles(t) {
+  const phi = (t - 0.055) * Math.PI * 2;
+  const s = Math.sin(phi);
+  const mapUpper = (v) => (v >= 0 ? v * 22.0 : v * 58.0);
+  // Interior angle breathes smoothly from 106° (back peak -> 74° flex) to 62° (forward peak -> 118° flex)!
+  const mapElbow = (v) => lerp(74, 118, (v + 1) * 0.5);
+  return {
+    s,
+    rUpper: mapUpper(s),
+    rElbow: mapElbow(s),
+    lUpper: mapUpper(-s),
+    lElbow: mapElbow(-s),
+  };
+}
+
+function sampleRunLeg(phase01, hipX, hipY) {
+  const t = ((phase01 % 1) + 1) % 1;
+
+  // STANCE PHASE (t in [0.000, 0.255] — F12, F1, F2, F3 for R; F6, F7, F8, F9 for L):
+  // Single fixed boot-local ball pivot (PIVOT_X = 2.60, PIVOT_Y = 1.50) world-locked to
+  // ballX(t) = 5.10 - RUN_CYCLE_DIST * t -> lands closer under COM (ankleX ~ +2.45, zero overstride!)
+  // with 0.000px horizontal drift across ALL 4 stance frames and plantar-flexed toe-off (52°) kissing y = 0.000!
+  const STANCE_END = 0.255;
+  const BALL_START_X = 5.10;
+  const PIVOT_X = 2.60;
+  const PIVOT_Y = 1.50;
+
+  if (t <= STANCE_END) {
+    const ballX = BALL_START_X - RUN_CYCLE_DIST * t;
+    let a = 0;
+    if (t < 0.040) {
+      // Soft near-level midfoot contact right under COM (zero heel-brake look!)
+      const k = t / 0.040;
+      a = lerp(-2, 0, easeOutCubic(k));
+    } else if (t <= 0.115) {
+      a = 0;
+    } else {
+      // Drive -> Toe-Off: strong plantarflexion to 52° with toe last to leave ground at y = 0.000!
+      const k = (t - 0.115) / (STANCE_END - 0.115);
+      const e = k * k * (2.2 - 1.2 * k);
+      a = lerp(0, 52, e);
+    }
+    const rad = degRad(a);
+    const pivRelX = PIVOT_X * Math.cos(rad) - PIVOT_Y * Math.sin(rad);
+    return {
+      x: ballX - pivRelX,
+      y: -bootLowestOffsetY(a),
+      a,
+      onGround: true,
+    };
+  }
+
+  // SWING & FLIGHT PHASE (t in (0.255, 1.000)):
+  // Driven directly by smooth periodic FK joint-angle keyframes (hip, knee, anatomical ankle interior angle)
+  const hipDeg = samplePeriodicSpline(RUN_SWING_HIP_DEG, t);
+  const kneeFlex = clamp(samplePeriodicSpline(RUN_SWING_KNEE_DEG, t), 8, 134);
+  const shinFromDown = hipDeg - kneeFlex;
+  const ankleInt = clamp(samplePeriodicSpline(RUN_SWING_ANKLE_INT, t), 82, 132);
+  const ankleDeg = ankleInteriorToBootAngle(shinFromDown, ankleInt);
+  const fk = fkLegAnkle(hipX, hipY, hipDeg, kneeFlex, 7.3, 7.2);
+
+  // Micro-blend at stance boundaries for C0 seam continuity
+  if (t < 0.275) {
+    const b = smoothstep(STANCE_END, 0.275, t);
+    const ballEnd = BALL_START_X - RUN_CYCLE_DIST * STANCE_END;
+    const rad = degRad(52);
+    const ex = ballEnd - (PIVOT_X * Math.cos(rad) - PIVOT_Y * Math.sin(rad));
+    const ey = -bootLowestOffsetY(52);
+    return {
+      x: lerp(ex, fk.x, b),
+      y: lerp(ey, fk.y, b),
+      a: lerp(52, ankleDeg, b),
+      onGround: false,
+    };
+  }
+  if (t > 0.975) {
+    const b = smoothstep(0.975, 1.0, t);
+    const rad = degRad(-2);
+    const sx = BALL_START_X - (PIVOT_X * Math.cos(rad) - PIVOT_Y * Math.sin(rad));
+    const sy = -bootLowestOffsetY(-2);
+    return {
+      x: lerp(fk.x, sx, b),
+      y: lerp(fk.y, sy, b),
+      a: lerp(ankleDeg, -2, b),
+      onGround: false,
+    };
+  }
+
+  return { x: fk.x, y: fk.y, a: ankleDeg, onGround: false };
+}
+
+function evalRunPose(u) {
+  const t = ((u % 1) + 1) % 1;
+  // Shift leg phase by +1/12 so Contact lands on F12/F6, Mid-Stance (lowest point) on F1/F7,
+  // Drive on F2/F8, Toe-Off on F3/F9, and two-frame Flight on F4-5 / F10-11!
+  const tLeg = (t + 1 / 12) % 1;
+  const pelvisY = samplePeriodicSpline(RUN_PELVIS_Y_HALF, (tLeg * 2) % 1);
+  const pelvisX = 0.55;
+
+  // Constant 9.5° athletic forward lean across ALL 12 frames; level head!
+  const torsoLean = 9.5;
+  const headTilt = -torsoLean * 0.30; // headDeg = torsoLean * 0.3 + headTilt === 0°!
+
+  const arms = evalRunArmAngles(t);
+  const hipYaw = samplePeriodicSpline(RUN_HIP_YAW, tLeg);
+  // Smooth torso counter-rotation peaking at stride extremes (keeps forward fist compact & back elbow clear!)
+  const shoulderYaw = arms.s * 0.25;
+
+  // Exact symmetrical hip & shoulder sockets matching solver in drawCharacter
+  const rHipX = pelvisX + hipYaw * 1.65;
+  const rHipY = pelvisY + 0.08;
+  const lHipX = pelvisX - hipYaw * 1.65;
+  const lHipY = pelvisY - 0.08;
+
+  const leanRad = degRad(torsoLean);
+  const chestX = pelvisX + Math.sin(leanRad) * 8.6;
+  const chestY = pelvisY - Math.cos(leanRad) * 8.6;
+  const rShX = chestX + shoulderYaw * 2.2;
+  const rShY = chestY + 0.35;
+  const lShX = chestX - shoulderYaw * 2.2;
+  const lShY = chestY - 0.35;
+
+  const rLeg = sampleRunLeg(tLeg, rHipX, rHipY);
+  const lLeg = sampleRunLeg((tLeg + 0.5) % 1, lHipX, lHipY);
+
+  const rHand = fkArmHand(rShX, rShY, arms.rUpper, arms.rElbow, 5.0, 4.3);
+  const lHand = fkArmHand(lShX, lShY, arms.lUpper, arms.lElbow, 5.0, 4.3);
+
+  return makePose({
+    pelvisX,
+    pelvisY,
+    torsoLean,
+    headTilt,
+    hipYaw,
+    shoulderYaw,
+
+    lFootX: lLeg.x,
+    lFootY: lLeg.y,
+    lFootAngle: lLeg.a,
+    rFootX: rLeg.x,
+    rFootY: rLeg.y,
+    rFootAngle: rLeg.a,
+
+    lHandX: lHand.x,
+    lHandY: lHand.y,
+    lElbowBend: 1,
+    rHandX: rHand.x,
+    rHandY: rHand.y,
+    rElbowBend: 1,
+    fkArms: {
+      rUpper: arms.rUpper,
+      rElbow: arms.rElbow,
+      lUpper: arms.lUpper,
+      lElbow: arms.lElbow,
+    },
+    clampFeet: false,
+  });
+}
 
 function getEnGardePose(ent, breath = 0) {
   const b = Math.sin(breath) * 0.35;
@@ -1061,170 +1337,214 @@ function evalPose(ent, time, vis) {
   }
 
   if (clip === 'run_start') {
-    const idle = evalIdlePose(ent, breath);
-    // Crisp athletic acceleration launch leaning smoothly into run(0.0)
-    const drive = makePose({
-      pelvisX: 0.6,
-      pelvisY: -14.2,
-      torsoLean: 17,
-      headTilt: -10,
-      hipYaw: 0.52,
-      shoulderYaw: -0.58,
+    // 4-stage progressive acceleration into evalRunPose(11/12) -> evalRunPose(0.0):
+    //   0.00 (F1): Contralateral ready lean from idle (near leg slightly ahead, near arm back, far arm forward)
+    //   0.33 (F2): Grounded accelerating push-off drive (rear foot planted pushing off, front knee lifting!)
+    //   0.67 (F3): REAL AIRBORNE STRIDE LAUNCH (v3's praised committed airborne beat: rear heel folding, lead knee bent!)
+    //   1.00 (F4): Lands cleanly into evalRunPose(11/12) initial contact (seamless flow into cycle!)
+    const runEntry = evalRunPose(11 / 12);
 
-      lFootX: -8.2,
-      lFootY: BASE_ANKLE_Y - 0.3,
-      lFootAngle: 38, // Rear leg drives back off the toe!
-
-      rFootX: 5.4,
-      rFootY: BASE_ANKLE_Y - 3.6,
-      rFootAngle: -6,
-
-      // Bent 90-degree pumping runner's arms (front hand up near chest, rear elbow driving back!)
-      lHandX: 5.8,
-      lHandY: -19.2,
-      lElbowBend: 1,
-      rHandX: -2.6,
-      rHandY: -15.8,
-      rElbowBend: 1,
+    // Stage 0 (u = 0.00): Contralateral ready lean from idle
+    const lean0 = 6.0;
+    const pelY0 = -14.80;
+    const c0X = 0.12 + Math.sin(degRad(lean0)) * 8.6;
+    const c0Y = pelY0 - Math.cos(degRad(lean0)) * 8.6;
+    const rH0 = fkArmHand(c0X - 0.15, c0Y + 0.35, -14, 66, 5.1, 4.3);
+    const lH0 = fkArmHand(c0X + 0.15, c0Y - 0.35, 10, 74, 5.1, 4.3);
+    const s0 = makePose({
+      pelvisX: 0.12, pelvisY: pelY0, torsoLean: lean0, headTilt: -lean0 * 0.30,
+      hipYaw: 0.10, shoulderYaw: -0.08,
+      lFootX: -2.4, lFootY: BASE_ANKLE_Y, lFootAngle: 0,
+      rFootX: 2.5, rFootY: BASE_ANKLE_Y, rFootAngle: 0,
+      lHandX: lH0.x, lHandY: lH0.y, lElbowBend: 1,
+      rHandX: rH0.x, rHandY: rH0.y, rElbowBend: 1,
+      fkArms: { rUpper: -14, rElbow: 66, lUpper: 10, lElbow: 74 },
+      clampFeet: false,
     });
-    return blendPose(idle, drive, easeOutCubic(u));
+
+    // Stage 1 (u = 0.33): Grounded accelerating push-off stride (rear foot STILL planted pushing off!)
+    const lean1 = 9.0;
+    const pelY1 = -14.70;
+    const c1X = 0.30 + Math.sin(degRad(lean1)) * 8.6;
+    const c1Y = pelY1 - Math.cos(degRad(lean1)) * 8.6;
+    const rH1 = fkArmHand(c1X - 0.4, c1Y + 0.35, -34, 80, 5.1, 4.3);
+    const lH1 = fkArmHand(c1X + 0.4, c1Y - 0.35, 18, 102, 5.1, 4.3);
+    const s1 = makePose({
+      pelvisX: 0.30, pelvisY: pelY1, torsoLean: lean1, headTilt: -lean1 * 0.30,
+      hipYaw: 0.16, shoulderYaw: -0.22,
+      lFootX: -4.6, lFootY: -bootLowestOffsetY(20), lFootAngle: 20, // Rear foot firmly planted pushing!
+      rFootX: 3.0, rFootY: -3.4, rFootAngle: 4,                     // Near knee driving forward
+      lHandX: lH1.x, lHandY: lH1.y, lElbowBend: 1,
+      rHandX: rH1.x, rHandY: rH1.y, rElbowBend: 1,
+      fkArms: { rUpper: -34, rElbow: 80, lUpper: 18, lElbow: 102 },
+      clampFeet: false,
+    });
+
+    // Stage 2 (u = 0.67): REAL AIRBORNE STRIDE LAUNCH (both feet off ground, rear heel folding, lead knee bent!)
+    const lean2 = 9.5;
+    const pelY2 = -16.65;
+    const c2X = 0.50 + Math.sin(degRad(lean2)) * 8.6;
+    const c2Y = pelY2 - Math.cos(degRad(lean2)) * 8.6;
+    const rH2 = fkArmHand(c2X - 0.75, c2Y + 0.35, -50, 77, 5.1, 4.3);
+    const lH2 = fkArmHand(c2X + 0.75, c2Y - 0.35, 23, 112, 5.1, 4.3);
+    const lFk2 = fkLegAnkle(0.50 - 0.16 * 1.65, pelY2 - 0.08, -20, 96, 7.3, 7.2);
+    const rFk2 = fkLegAnkle(0.50 + 0.16 * 1.65, pelY2 + 0.08, 44, 44, 7.3, 7.2);
+    const s2 = makePose({
+      pelvisX: 0.50, pelvisY: pelY2, torsoLean: lean2, headTilt: -lean2 * 0.30,
+      hipYaw: 0.16, shoulderYaw: -0.34,
+      lFootX: lFk2.x, lFootY: lFk2.y, lFootAngle: ankleInteriorToBootAngle(-20 - 96, 124), // Relaxed plantar-flexed recovering foot!
+      rFootX: rFk2.x, rFootY: rFk2.y, rFootAngle: ankleInteriorToBootAngle(44 - 44, 88),   // Dorsiflexed lead foot ready to land!
+      lHandX: lH2.x, lHandY: lH2.y, lElbowBend: 1,
+      rHandX: rH2.x, rHandY: rH2.y, rElbowBend: 1,
+      fkArms: { rUpper: -50, rElbow: 77, lUpper: 23, lElbow: 112 },
+      clampFeet: false,
+    });
+
+    if (u < 0.335) return blendPose(s0, s1, easeInOutQuad(u / 0.335));
+    if (u < 0.67) return blendPose(s1, s2, easeInOutQuad((u - 0.335) / 0.335));
+    return blendPose(s2, runEntry, easeInOutQuad((u - 0.67) / 0.33));
   }
 
   if (clip === 'run') {
-    // Ground-eating athletic human run cycle matched to RUN_SPEED = 104 px/s (~21.8px/step):
-    // Long horizontal stride (+8.6 contact -> -10.2 push-off = 18.8px sweep) with natural low swing recovery!
-    const phi = u * Math.PI * 2;
-
-    // 8-point biomechanical foot keyframe table over one full leg cycle t in [0, 1)
-    const LEG_KEYS = [
-      { t: 0.00, x:  8.6, y: -1.5, a: -18 }, // Extended forward stride heel-midfoot contact!
-      { t: 0.14, x:  1.4, y: -1.5, a:   0 }, // Mid-stance weight absorption under hip
-      { t: 0.27, x: -4.8, y: -1.5, a:  16 }, // Powerful backward drive past hip
-      { t: 0.39, x: -10.2, y: -1.8, a: 44 }, // Long straight-leg toe push-off!
-      { t: 0.54, x: -8.6, y: -4.1, a:  42 }, // Efficient natural heel recovery (not exaggeratedly high!)
-      { t: 0.69, x: -1.0, y: -3.2, a:  18 }, // Low clean passing swing beneath hip
-      { t: 0.84, x:  6.4, y: -3.0, a:  -4 }, // Reaching forward stride opening
-      { t: 0.93, x:  8.8, y: -2.0, a: -18 }, // Smooth reach down to contact
-    ];
-
-    const sampleLeg = (phase01) => {
-      const t = ((phase01 % 1) + 1) % 1;
-      let i0 = LEG_KEYS.length - 1;
-      let i1 = 0;
-      for (let i = 0; i < LEG_KEYS.length; i++) {
-        const next = (i + 1) % LEG_KEYS.length;
-        const t0 = LEG_KEYS[i].t;
-        const t1 = next === 0 ? 1.0 : LEG_KEYS[next].t;
-        if (t >= t0 && t < t1) {
-          i0 = i;
-          i1 = next;
-          const span = t1 - t0;
-          const f = span > 0 ? (t - t0) / span : 0;
-          // Linear ground travel during stance (0..0.39) so foot stays locked to floor; smoothstep in air!
-          const k = i0 < 3 ? f : (f * f * (3 - 2 * f));
-          const A = LEG_KEYS[i0], B = LEG_KEYS[i1];
-          return { x: lerp(A.x, B.x, k), y: lerp(A.y, B.y, k), a: lerp(A.a, B.a, k) };
-        }
-      }
-      return LEG_KEYS[0];
-    };
-
-    const rLeg = sampleLeg(u);
-    const lLeg = sampleLeg(u + 0.5);
-
-    // Subtle athletic vertical bounce: low at mid-stance (-13.6), springy at push-off flight (-14.9)
-    const bounce = -Math.cos((u - 0.39) * Math.PI * 4) * 0.65;
-    const pelvisY = -14.25 + bounce;
-
-    // Counter-rotating hips & shoulders (hips twist toward lead leg, shoulders twist opposite!)
-    const hipYaw = Math.cos(phi) * 0.62;
-    const shoulderYaw = -Math.cos(phi) * 0.68;
-
-    // Real runner's 90-degree bent arms:
-    const sampleArm = (phase01) => {
-      const s = Math.cos(phase01 * Math.PI * 2); // +1 = forward drive, -1 = back drive
-      const f = (s + 1) * 0.5;
-      return {
-        x: lerp(-3.2, 6.2, f),
-        y: lerp(-15.5, -19.2, f) + Math.sin(f * Math.PI) * 1.1,
-      };
-    };
-    const rArm = sampleArm(u + 0.5);
-    const lArm = sampleArm(u);
-
-    return makePose({
-      pelvisX: 0.5,
-      pelvisY,
-      torsoLean: 16 + Math.sin(phi * 2) * 1.6,
-      headTilt: -10 - Math.sin(phi * 2) * 0.9,
-      hipYaw,
-      shoulderYaw,
-
-      lFootX: lLeg.x,
-      lFootY: lLeg.y,
-      lFootAngle: lLeg.a,
-      rFootX: rLeg.x,
-      rFootY: rLeg.y,
-      rFootAngle: rLeg.a,
-
-      lHandX: lArm.x,
-      lHandY: lArm.y,
-      lElbowBend: 1,
-      rHandX: rArm.x,
-      rHandY: rArm.y,
-      rElbowBend: 1,
-      clampFeet: false,
-    });
+    return evalRunPose(u);
   }
 
   if (clip === 'skid') {
-    // Hard braking heel-dig: torso leans back, lead leg braced nearly straight forward heel-down!
-    const settle = easeInOutQuad(u);
-    const skidPeak = makePose({
-      pelvisX: -2.0,
-      pelvisY: -12.8,
-      torsoLean: -19,
-      headTilt: 14,
-      hipYaw: 0.72,
-      shoulderYaw: -0.35,
-
-      lFootX: -6.4,
-      lFootY: BASE_ANKLE_Y,
-      lFootAngle: 12,
-      rFootX: 9.2,
-      rFootY: BASE_ANKLE_Y,
-      rFootAngle: -26, // Front heel dug into stone/ice, toe raised!
-
-      lHandX: -8.2,
-      lHandY: -18.8,
-      lElbowBend: -1,
-      rHandX: 6.8,
-      rHandY: -18.2,
-      rElbowBend: 1,
-    });
+    // Decisive braking heel-dig with continuous arm recovery & open counterbalance silhouette:
+    //   F1: Backward lean (-14°), steady head height, braced bent front knee (~22° flex),
+    //       near arm open forward (+26°/104°), dark far arm clearly visible behind back (-46°/78°)!
+    //   F2: Smooth deceleration (-6°), near arm easing down (+12°), far arm easing forward (-20°)
+    //   F3: Upright idle (continuous same-side arm recovery throughout!)
     const idle = evalIdlePose(ent, breath);
-    return blendPose(skidPeak, idle, settle * 0.55);
+    const leanPeak = -14;
+    const pelYPeak = -13.5;
+    const cX = -1.5 + Math.sin(degRad(leanPeak)) * 8.6;
+    const cY = pelYPeak - Math.cos(degRad(leanPeak)) * 8.6;
+    const rH = fkArmHand(cX + 0.55, cY + 0.35, 26, 104, 5.1, 4.3);
+    const lH = fkArmHand(cX - 0.65, cY - 0.35, -46, 78, 5.1, 4.3); // Clearly visible counterbalance behind back!
+
+    const skidPeak = makePose({
+      pelvisX: -1.5,
+      pelvisY: pelYPeak,
+      torsoLean: leanPeak,
+      headTilt: -leanPeak * 0.30,
+      hipYaw: 0.34,
+      shoulderYaw: 0.24,
+
+      lFootX: -5.4,
+      lFootY: BASE_ANKLE_Y,
+      lFootAngle: 8,
+      rFootX: 7.4,
+      rFootY: -bootLowestOffsetY(-24),
+      rFootAngle: -24,
+
+      lHandX: lH.x,
+      lHandY: lH.y,
+      lElbowBend: 1,
+      rHandX: rH.x,
+      rHandY: rH.y,
+      rElbowBend: 1,
+      fkArms: { rUpper: 26, rElbow: 104, lUpper: -46, lElbow: 78 },
+      clampFeet: false,
+    });
+
+    const leanMid = -5.5;
+    const pelYMid = -14.3;
+    const cmX = -0.6 + Math.sin(degRad(leanMid)) * 8.6;
+    const cmY = pelYMid - Math.cos(degRad(leanMid)) * 8.6;
+    const rHm = fkArmHand(cmX + 0.25, cmY + 0.35, 12, 82, 5.1, 4.3);
+    const lHm = fkArmHand(cmX - 0.35, cmY - 0.35, -20, 76, 5.1, 4.3);
+    const skidMid = makePose({
+      ...idle,
+      pelvisX: -0.6,
+      pelvisY: pelYMid,
+      torsoLean: leanMid,
+      headTilt: -leanMid * 0.30,
+      hipYaw: 0.24,
+      shoulderYaw: 0.14,
+      lFootX: -3.6,
+      rFootX: 4.8,
+      rFootY: -bootLowestOffsetY(-8),
+      rFootAngle: -8,
+      lHandX: lHm.x,
+      lHandY: lHm.y,
+      lElbowBend: 1,
+      rHandX: rHm.x,
+      rHandY: rHm.y,
+      rElbowBend: 1,
+      fkArms: { rUpper: 12, rElbow: 82, lUpper: -20, lElbow: 76 },
+      clampFeet: false,
+    });
+
+    if (u < 0.50) return blendPose(skidPeak, skidMid, easeInOutQuad(u / 0.50));
+    return blendPose(skidMid, idle, easeOutCubic((u - 0.50) / 0.50));
   }
 
   if (clip === 'turn') {
     const idle = evalIdlePose(ent, breath);
-    // Smooth 180-degree weight pivot: shoulders sweep across, trailing foot steps around
+    // True 180-degree athletic directional pivot:
+    //   u = 0.0 (F1): Athletic braking lean entering from left run (-8° lean, slightly flexed knees, contralateral bent arms)
+    //   u = 0.5 (F2): Front-facing pivot keeping consistent height/width, clean knee alignment, asymmetrical bent arms!
+    //   u = 1.0 (F3): Right-facing CONTRALATERAL exit (near leg forward, NEAR arm BACK -26°, FAR arm FORWARD +18°!)
+    const e = easeInOutQuad(u);
     const p = Math.sin(u * Math.PI);
+    const faceYaw = lerp(-0.90, 1.0, e);
+    const lean = lerp(-8, 6.5, e);
+    const pelY = lerp(-14.2, -14.6, e) + 0.75 * p; // Consistent height across F1, F2, F3 (no shrinking on F2!)
+    const cX = Math.sin(degRad(lean)) * 8.6;
+    const cY = pelY - Math.cos(degRad(lean)) * 8.6;
+
+    // Frame 1 (left-facing braking entry): compact bent arms coiled for turn
+    const rH0 = fkArmHand(cX + 0.8, cY + 0.35, 24, -84, 5.1, 4.3);
+    const lH0 = fkArmHand(cX - 0.8, cY - 0.35, -18, -104, 5.1, 4.3);
+    // Frame 2 (front-facing mid-pivot): handled by asymmetric frontFacing pivot arms in drawCharacter
+    const lH1 = { x: cX - 3.0, y: cY + 6.8 };
+    const rH1 = { x: cX + 3.4, y: cY + 6.0 };
+    // Frame 3 (right-facing CONTRALATERAL exit ready to sprint right: near arm BACK, far arm FORWARD!)
+    const rH2 = fkArmHand(cX - 0.6, cY + 0.35, -26, 82, 5.1, 4.3);
+    const lH2 = fkArmHand(cX + 0.6, cY - 0.35, 18, 102, 5.1, 4.3);
+
+    let lHand, rHand, lBend, rBend;
+    if (u < 0.5) {
+      const k = easeInOutQuad(u / 0.5);
+      lHand = { x: lerp(lH0.x, lH1.x, k), y: lerp(lH0.y, lH1.y, k) };
+      rHand = { x: lerp(rH0.x, rH1.x, k), y: lerp(rH0.y, rH1.y, k) };
+      lBend = k < 0.5 ? -1 : 1;
+      rBend = -1;
+    } else {
+      const k = easeInOutQuad((u - 0.5) / 0.5);
+      lHand = { x: lerp(lH1.x, lH2.x, k), y: lerp(lH1.y, lH2.y, k) };
+      rHand = { x: lerp(rH1.x, rH2.x, k), y: lerp(rH1.y, rH2.y, k) };
+      lBend = 1;
+      rBend = 1;
+    }
+
+    const lFootX = u < 0.5 ? lerp(-3.0, -2.5, easeInOutQuad(u / 0.5)) : lerp(-2.5, -2.6, easeInOutQuad((u - 0.5) / 0.5));
+    const rFootX = u < 0.5 ? lerp(2.8, 2.5, easeInOutQuad(u / 0.5)) : lerp(2.5, 3.0, easeInOutQuad((u - 0.5) / 0.5));
+
     return makePose({
       ...idle,
-      pelvisY: idle.pelvisY + 0.9 * p,
-      torsoLean: lerp(-8, idle.torsoLean, easeOutCubic(u)),
-      headTilt: lerp(-6, idle.headTilt, easeOutCubic(u)),
-      hipYaw: lerp(-0.55, idle.hipYaw, easeInOutQuad(u)),
-      shoulderYaw: lerp(-0.85, idle.shoulderYaw, easeInOutQuad(u)),
-      lFootX: lerp(2.2, idle.lFootX, easeInOutQuad(u)),
-      lFootY: BASE_ANKLE_Y - 1.5 * p,
-      rFootX: lerp(-2.0, idle.rFootX, easeInOutQuad(u)),
+      pelvisY: pelY,
+      torsoLean: lean,
+      headTilt: -lean * 0.25,
+      hipYaw: lerp(-0.22, 0.20, e),
+      shoulderYaw: lerp(-0.24, -0.20, e),
+      lFootX,
+      lFootY: BASE_ANKLE_Y - 0.9 * p,
+      lFootAngle: 7 * p,
+      lFootTurnOut: p > 0.65 ? 0.95 : 0.0,
+      rFootX,
       rFootY: BASE_ANKLE_Y,
-      lHandX: lerp(3.4, idle.lHandX, easeInOutQuad(u)),
-      lHandY: -15.5,
-      rHandX: lerp(-2.8, idle.rHandX, easeInOutQuad(u)),
-      rHandY: -15.5,
+      rFootTurnOut: p > 0.65 ? 0.95 : 0.0,
+      lHandX: lHand.x,
+      lHandY: lHand.y,
+      lElbowBend: lBend,
+      rHandX: rHand.x,
+      rHandY: rHand.y,
+      rElbowBend: rBend,
+      fkArms: u > 0.85 ? { rUpper: -26, rElbow: 82, lUpper: 18, lElbow: 102 } : null,
+      clampFeet: false,
+      faceYaw,
     });
   }
 
@@ -1755,13 +2075,18 @@ function drawLimbTaper(ctx, x1, y1, x2, y2, r1, r2, fill, hi = null, outline = n
   ctx.fill();
 }
 
-function drawBoot(ctx, ankle, angleDeg, turnOut, pal, isFront, outline, hS) {
+function drawBoot(ctx, ankle, angleDeg, turnOut, pal, isFront, outline, hS, flipX = false) {
   const a = degRad(angleDeg);
   const ah = 1.5 * hS;
 
   ctx.save();
   ctx.translate(ankle.x, ankle.y);
-  ctx.rotate(a);
+  if (flipX && turnOut <= 0.55) {
+    ctx.scale(-1, 1);
+    ctx.rotate(-a);
+  } else {
+    ctx.rotate(a);
+  }
 
   const fill = isFront ? pal.boots : '#0d0f13';
   const hi = isFront ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.06)';
@@ -1834,11 +2159,11 @@ function drawHand(ctx, hand, elbow, skin, skinShade, outline) {
   ctx.rotate(ang);
   ctx.fillStyle = skin;
   ctx.beginPath();
-  ctx.ellipse(0.4, 0, 1.15, 0.85, 0, 0, Math.PI * 2);
+  ctx.ellipse(0.3, 0, 1.0, 0.85, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = skinShade;
   ctx.beginPath();
-  ctx.ellipse(0.3, 0.35, 0.8, 0.35, 0, 0, Math.PI * 2);
+  ctx.ellipse(0.2, 0.32, 0.72, 0.34, 0, 0, Math.PI * 2);
   ctx.fill();
   if (outline) {
     ctx.strokeStyle = outline;
@@ -2076,32 +2401,35 @@ function drawDiamondStar(ctx, x, y, r, color, core) {
   ctx.fill();
 }
 
-function drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulder, pal, flashing, outline, hemAng, wS, hS) {
+function drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulder, pal, flashing, outline, hemAng, wS, hS, faceYaw = 1, shoulderYaw = 0) {
   const jacket = flashing ? '#ffffff' : pal.jacket;
   const jacketHi = flashing ? '#ffffff' : pal.jacketHi;
   const jacketDark = flashing ? '#ffcccc' : pal.jacketDark;
 
+  const frontView = Math.abs(faceYaw) < 0.35;
+  const faceSign = faceYaw < -0.35 ? -1 : 1;
+
   // Spine axis (pelvis -> waist -> chest):
-  // ux, uy points UP along spine; fx, fy points FORWARD (+x when upright)!
+  // ux, uy points UP along spine; fx, fy points FORWARD (+x when upright & facing right, -x when facing left)!
   const dxT = chest.x - pelvis.x;
   const dyT = chest.y - pelvis.y;
   const tLen = Math.hypot(dxT, dyT) || 1;
   const ux = dxT / tLen;
   const uy = dyT / tLen;
-  const fx = -dyT / tLen; // +1 when upright (chest front!)
-  const fy = dxT / tLen;
+  const fx = (-dyT / tLen) * faceSign;
+  const fy = (dxT / tLen) * faceSign;
 
   const waist = { x: lerp(pelvis.x, chest.x, 0.38), y: lerp(pelvis.y, chest.y, 0.38) };
   const shYaw = clamp(Math.abs(rShoulder.x - lShoulder.x) / (4.7 * wS), 0, 1);
   const hipYaw = clamp(Math.abs(rHip.x - lHip.x) / (3.7 * wS), 0, 1);
 
-  // Anatomical full-bodied ribcage, waist, and pelvis widths (never pinches or inverts!)
-  const chestBack = (2.65 + shYaw * 0.55) * wS;
-  const chestFront = (2.95 + shYaw * 0.65) * wS;
-  const waistBack = (2.00 + hipYaw * 0.25) * wS;
-  const waistFront = (2.20 + hipYaw * 0.30) * wS;
-  const hipBack = (2.35 + hipYaw * 0.40) * wS;
-  const hipFront = (2.50 + hipYaw * 0.45) * wS;
+  // Anatomical full-bodied ribcage, waist, and pelvis widths (steady across the entire run cycle!)
+  const chestBack = (frontView ? 3.25 : 2.85) * wS;
+  const chestFront = (frontView ? 3.25 : 3.05) * wS;
+  const waistBack = (frontView ? 2.40 : 2.15) * wS;
+  const waistFront = (frontView ? 2.40 : 2.28) * wS;
+  const hipBack = (frontView ? 2.65 : 2.55) * wS;
+  const hipFront = (frontView ? 2.65 : 2.58) * wS;
 
   const pSL = { x: chest.x - fx * chestBack, y: chest.y - fy * chestBack };
   const pSR = { x: chest.x + fx * chestFront, y: chest.y + fy * chestFront };
@@ -2112,13 +2440,13 @@ function drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulde
   const waistL = pWL;
   const waistR = pWR;
 
-  // Secondary-motion coat-tail / jacket hem behind pelvis
+  // Secondary-motion coat-tail / jacket hem behind pelvis (suppressed on front view)
   const hemRad = degRad(hemAng);
-  const tailLen = pal.coatStyle === 'suit_tails' ? 5.6 * hS : pal.coatStyle === 'courier' ? 2.4 * hS : 1.6 * hS;
+  const tailLen = frontView ? 0 : (pal.coatStyle === 'suit_tails' ? 5.6 * hS : pal.coatStyle === 'courier' ? 2.2 * hS : 1.6 * hS);
   if (tailLen > 1.2) {
-    const tx = pHL.x - ux * tailLen + Math.sin(hemRad) * tailLen * 0.7;
+    const tx = pHL.x - ux * tailLen + Math.sin(hemRad) * tailLen * 0.7 * faceSign;
     const ty = pHL.y - uy * tailLen + Math.cos(hemRad) * 0.4;
-    const tx2 = pelvis.x - ux * (tailLen * 0.75) + Math.sin(hemRad) * tailLen * 0.4;
+    const tx2 = pelvis.x - ux * (tailLen * 0.75) + Math.sin(hemRad) * tailLen * 0.4 * faceSign;
     const ty2 = pelvis.y - uy * (tailLen * 0.75);
     ctx.beginPath();
     ctx.moveTo(pHL.x, pHL.y);
@@ -2171,17 +2499,23 @@ function drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulde
   if (!flashing) {
     if (pal.coatStyle === 'courier') {
       // High collar + iconic diagonal white Swiss courier strap + brass buckle
+      // Shifts slightly with shoulderYaw so torso counter-rotation reads clearly in 3D!
+      const twistShift = frontView ? 0 : clamp(shoulderYaw * 1.45, -0.85, 0.85);
+      const sxTop = lerp(pSL.x, chest.x, frontView ? 0.25 : 0.55) + fx * twistShift;
+      const syTop = lerp(pSL.y, chest.y, frontView ? 0.25 : 0.55) + fy * twistShift;
+      const sxBot = lerp(pHR.x, pelvis.x, frontView ? 0.18 : 0.30) + fx * (twistShift * 0.45);
+      const syBot = lerp(pHR.y, pelvis.y, frontView ? 0.18 : 0.30) + fy * (twistShift * 0.45);
       ctx.strokeStyle = pal.accent;
-      ctx.lineWidth = 1.25;
+      ctx.lineWidth = frontView ? 1.35 : 1.15 - Math.max(0, twistShift) * 0.25;
       ctx.beginPath();
-      ctx.moveTo(lerp(pSL.x, chest.x, 0.55), lerp(pSL.y, chest.y, 0.55));
-      ctx.lineTo(lerp(pHR.x, pelvis.x, 0.3), lerp(pHR.y, pelvis.y, 0.3));
+      ctx.moveTo(sxTop, syTop);
+      ctx.lineTo(sxBot, syBot);
       ctx.stroke();
       // Small brass buckle
-      const bx = lerp(pSL.x, pHR.x, 0.52);
-      const by = lerp(pSL.y, pHR.y, 0.52);
+      const bx = lerp(sxTop, sxBot, 0.52);
+      const by = lerp(syTop, syBot, 0.52);
       ctx.fillStyle = '#e0b84c';
-      ctx.fillRect(bx - 0.7, by - 0.7, 1.4, 1.4);
+      ctx.fillRect(bx - 0.65, by - 0.65, 1.3, 1.3);
       // Collar rim
       ctx.strokeStyle = jacketHi;
       ctx.lineWidth = 0.9;
@@ -2296,76 +2630,68 @@ function drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulde
     ctx.stroke();
   }
 
-  // Hero / Deepfake soft draped courier scarf (hangs down by gravity when still; streams gently back when moving!)
+  // Hero / Deepfake neat courier collar wrap (clean silhouette, zero stray sliver behind upper back!)
   if (pal.scarfColor && !flashing) {
-    // Wrap collar neatly around neck base
     ctx.fillStyle = pal.scarfStripe || pal.jacketDark;
     ctx.beginPath();
-    ctx.ellipse(chest.x + 0.1, chest.y - 0.4, 1.9, 0.85, 0, 0, Math.PI * 2);
+    ctx.ellipse(chest.x + 0.1, chest.y - 0.35, 2.05, 0.85, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // Soft cloth tail hangs downward along upper back at rest, streams smoothly back with velocity (hemAng)
-    const flutter = clamp(-hemAng / 26, -0.35, 1.1);
-    const sx0 = chest.x - 1.3;
-    const sy0 = chest.y - 0.1;
-    const sx1 = sx0 - 1.0 - flutter * 2.2;
-    const sy1 = sy0 + 2.1 - flutter * 0.9;
-    const sx2 = sx0 - 1.4 - flutter * 4.0;
-    const sy2 = sy0 + 4.1 - flutter * 1.9;
-
-    ctx.beginPath();
-    ctx.moveTo(sx0 + 0.5, sy0 - 0.3);
-    ctx.quadraticCurveTo(sx1 + 0.45, sy1 - 0.3, sx2, sy2);
-    ctx.quadraticCurveTo(sx1 - 0.45, sy1 + 0.4, sx0 - 0.5, sy0 + 0.5);
-    ctx.closePath();
-    ctx.fillStyle = pal.scarfStripe || pal.jacket;
-    ctx.fill();
-
-    // Subtle white courier trim edge on scarf tail
-    ctx.strokeStyle = pal.scarfColor;
-    ctx.lineWidth = 0.45;
-    ctx.beginPath();
-    ctx.moveTo(sx0 + 0.3, sy0 - 0.1);
-    ctx.quadraticCurveTo(sx1 + 0.3, sy1 - 0.2, sx2, sy2);
-    ctx.stroke();
+    ctx.fillStyle = pal.scarfColor;
+    ctx.fillRect(chest.x - 1.25, chest.y - 0.6, 2.55, 0.42);
   }
+  return {
+    torsoBackX: pWL.x,
+    torsoFrontX: pWR.x,
+    chestBackX: pSL.x,
+    chestFrontX: pSR.x,
+    hipBackX: pHL.x,
+    hipFrontX: pHR.x,
+  };
 }
 
-function drawHeadAndHair(ctx, neck, head, headAngleDeg, pal, flashing, outline, hairAng, wS, hS) {
+function drawHeadAndHair(ctx, neck, head, headAngleDeg, pal, flashing, outline, hairAng, wS, hS, faceYaw = 1) {
   const skin = flashing ? '#ffffff' : pal.skin;
   const skinShade = flashing ? '#ffdddd' : pal.skinShade;
   const rx = 2.25 * wS;
   const ry = 2.65 * hS;
 
   // Articulated neck
-  drawLimbTaper(ctx, neck.x, neck.y + 0.5, head.x - 0.2, head.y + 1.5, 1.05 * wS, 0.9 * wS, skinShade, skin);
+  drawLimbTaper(ctx, neck.x, neck.y + 0.5, head.x - 0.1 * Math.sign(faceYaw || 1), head.y + 1.5, 1.05 * wS, 0.9 * wS, skinShade, skin);
 
   ctx.save();
   ctx.translate(head.x, head.y);
   ctx.rotate(degRad(headAngleDeg));
 
-  // Head oval + subtle forward nose/jaw profile silhouette so face direction is crystal clear!
+  const frontView = Math.abs(faceYaw) < 0.35;
+  const flipHead = faceYaw < -0.35;
+  if (flipHead) {
+    ctx.scale(-1, 1);
+  }
+
+  // Head oval + subtle forward nose/jaw profile silhouette (suppressed when facing directly toward viewer)
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
   ctx.fillStyle = skin;
   ctx.fill();
 
-  // Subtle nose/brow & chin profile toward +x
-  ctx.beginPath();
-  ctx.moveTo(rx * 0.78, -0.7);
-  ctx.lineTo(rx + 0.55, 0.05);
-  ctx.lineTo(rx * 0.72, 0.45);
-  ctx.lineTo(rx * 0.85, 1.45);
-  ctx.lineTo(0.2, ry * 0.92);
-  ctx.closePath();
-  ctx.fillStyle = skin;
-  ctx.fill();
+  if (!frontView) {
+    // Subtle nose/brow & chin profile toward +x
+    ctx.beginPath();
+    ctx.moveTo(rx * 0.78, -0.7);
+    ctx.lineTo(rx + 0.55, 0.05);
+    ctx.lineTo(rx * 0.72, 0.45);
+    ctx.lineTo(rx * 0.85, 1.45);
+    ctx.lineTo(0.2, ry * 0.92);
+    ctx.closePath();
+    ctx.fillStyle = skin;
+    ctx.fill();
 
-  // Back-of-head shadow crescent
-  ctx.beginPath();
-  ctx.arc(-0.35, 0.1, rx * 0.92, Math.PI * 0.55, Math.PI * 1.45);
-  ctx.fillStyle = skinShade;
-  ctx.fill();
+    // Back-of-head shadow crescent
+    ctx.beginPath();
+    ctx.arc(-0.35, 0.1, rx * 0.92, Math.PI * 0.55, Math.PI * 1.45);
+    ctx.fillStyle = skinShade;
+    ctx.fill();
+  }
 
   if (outline) {
     ctx.strokeStyle = outline;
@@ -2375,40 +2701,65 @@ function drawHeadAndHair(ctx, neck, head, headAngleDeg, pal, flashing, outline, 
     ctx.stroke();
   }
 
-  // Expressive eye & brow on facing side (+x)
+  // Expressive eye(s) & brow(s)
   if (!flashing) {
-    ctx.fillStyle = '#181a20';
-    ctx.fillRect(rx * 0.36, -0.55, 0.75, 0.75);
-    ctx.fillStyle = pal.hair;
-    ctx.fillRect(rx * 0.25, -1.15, 1.15, 0.4);
+    if (frontView) {
+      // Front-facing passing silhouette during 180-degree turn (both eyes & nose bridge!)
+      const shiftX = faceYaw * 0.6;
+      ctx.fillStyle = '#181a20';
+      ctx.fillRect(-1.1 + shiftX, -0.5, 0.65, 0.7);
+      ctx.fillRect(0.45 + shiftX, -0.5, 0.65, 0.7);
+      ctx.fillStyle = pal.hair;
+      ctx.fillRect(-1.25 + shiftX, -1.1, 0.95, 0.35);
+      ctx.fillRect(0.3 + shiftX, -1.1, 0.95, 0.35);
+      ctx.fillStyle = skinShade;
+      ctx.fillRect(-0.15 + shiftX, 0.1, 0.35, 0.65);
+    } else {
+      ctx.fillStyle = '#181a20';
+      ctx.fillRect(rx * 0.36, -0.55, 0.75, 0.75);
+      ctx.fillStyle = pal.hair;
+      ctx.fillRect(rx * 0.25, -1.15, 1.15, 0.4);
+    }
   }
 
   // Distinct hair / headwear per archetype
   const hw = pal.headwear || 'hair_courier';
   if (hw === 'hair_courier') {
-    // Tousled athletic courier hair + secondary-motion rear hair lock
-    ctx.fillStyle = pal.hair;
-    ctx.beginPath();
-    ctx.ellipse(-0.4, -1.0, rx * 1.04, ry * 0.74, -0.15, Math.PI * 0.82, Math.PI * 2.15);
-    ctx.fill();
-    // Forward fringe tuft
-    ctx.beginPath();
-    ctx.moveTo(0.4, -ry * 0.92);
-    ctx.lineTo(rx + 0.7, -1.45);
-    ctx.lineTo(rx * 0.45, -1.05);
-    ctx.closePath();
-    ctx.fill();
-    // Animated rear hair tuft
-    const hShift = clamp(hairAng * 0.08, -1.4, 1.4);
-    ctx.beginPath();
-    ctx.moveTo(-rx * 0.85, -0.8);
-    ctx.lineTo(-rx - 1.4 + hShift, -0.1 + Math.abs(hShift) * 0.3);
-    ctx.lineTo(-rx * 0.7, 0.65);
-    ctx.closePath();
-    ctx.fill();
-    // Subtle hair specular
-    ctx.fillStyle = pal.hairHi;
-    ctx.fillRect(-0.8, -ry * 0.85, 1.8, 0.55);
+    if (frontView) {
+      // Front-facing athletic hair crown during turn passing frame
+      ctx.fillStyle = pal.hair;
+      ctx.beginPath();
+      ctx.ellipse(0, -1.15, rx * 1.04, ry * 0.62, 0, Math.PI * 0.95, Math.PI * 2.05);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = pal.hairHi;
+      ctx.beginPath();
+      ctx.ellipse(0, -ry * 0.76, 1.1, 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Natural, compact athletic courier hair hugging the skull & nape
+      ctx.fillStyle = pal.hair;
+      ctx.beginPath();
+      ctx.moveTo(rx * 0.95, -1.05);
+      ctx.quadraticCurveTo(rx * 0.55, -ry * 1.15, -0.35, -ry * 1.08);
+      ctx.quadraticCurveTo(-rx * 1.15, -ry * 0.92, -rx * 1.05, -0.15);
+      ctx.quadraticCurveTo(-rx * 1.05, 0.75, -rx * 0.45, 0.95);
+      ctx.lineTo(-rx * 0.35, -0.2);
+      ctx.quadraticCurveTo(0.2, -1.25, rx * 0.95, -1.05);
+      ctx.closePath();
+      ctx.fill();
+      const hShift = clamp(hairAng * 0.03, -0.55, 0.55);
+      ctx.beginPath();
+      ctx.moveTo(-rx * 0.85, -1.35);
+      ctx.quadraticCurveTo(-rx * 1.18 + hShift, -0.85, -rx * 1.02 + hShift, 0.25);
+      ctx.lineTo(-rx * 0.65, 0.25);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = pal.hairHi;
+      ctx.beginPath();
+      ctx.ellipse(-0.3, -ry * 0.80, 1.15, 0.32, -0.18, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else if (hw === 'hair_zins') {
     // Slicked-back aristocratic silver hair (exposing full face profile!) + monocle gleam
     ctx.fillStyle = pal.hair;
@@ -2522,7 +2873,7 @@ function drawHeadAndHair(ctx, neck, head, headAngleDeg, pal, flashing, outline, 
 // Main Character Renderer (Exported to render.js)
 // ---------------------------------------------------------------------------
 
-export function drawCharacter(ctx, ent, time) {
+export function drawCharacter(ctx, ent, time, debugOut = null) {
   const pal = resolveProfile(ent);
   const vis = getEntityVis(ent, time);
 
@@ -2603,8 +2954,8 @@ export function drawCharacter(ctx, ent, time) {
   const L_SHIN = 7.2 * hS;
   const L_TORSO = 8.6 * hS;
   const L_NECK = 1.5 * hS;
-  const L_UPPER = 5.2 * hS;
-  const L_FORE = 5.1 * hS;
+  const L_UPPER = 5.0 * hS;
+  const L_FORE = 4.3 * hS;
   const ANKLE_H = 1.5 * hS;
 
   // Solve skeleton in local character space (+x = facing, +y = down, y = 0 = floor!)
@@ -2625,11 +2976,21 @@ export function drawCharacter(ctx, ent, time) {
     y: neck.y - Math.cos(headRad) * (2.15 * hS),
   };
 
-  // Counter-rotating hip & shoulder sockets (3D torso twist!)
-  const rHip = { x: pelvis.x + pose.hipYaw * 1.85 * wS, y: pelvis.y + 0.3 };
-  const lHip = { x: pelvis.x - pose.hipYaw * 1.85 * wS, y: pelvis.y - 0.25 };
-  const rShoulder = { x: chest.x + pose.shoulderYaw * 2.35 * wS, y: chest.y + 0.35 };
-  const lShoulder = { x: chest.x - pose.shoulderYaw * 2.35 * wS, y: chest.y - 0.35 };
+  // Counter-rotating hip & shoulder sockets (symmetrical L/R vertical hip heights; clean front-facing alignment!)
+  const fYaw = pose.faceYaw ?? 1;
+  const frontFacing = Math.abs(fYaw) < 0.35;
+  const rHip = frontFacing
+    ? { x: pelvis.x + 1.55 * wS, y: pelvis.y + 0.12 }
+    : { x: pelvis.x + pose.hipYaw * 1.65 * wS, y: pelvis.y + 0.08 };
+  const lHip = frontFacing
+    ? { x: pelvis.x - 1.55 * wS, y: pelvis.y + 0.12 }
+    : { x: pelvis.x - pose.hipYaw * 1.65 * wS, y: pelvis.y - 0.08 };
+  const rShoulder = frontFacing
+    ? { x: chest.x + 2.85 * wS, y: chest.y + 0.2 }
+    : { x: chest.x + pose.shoulderYaw * 2.2 * wS, y: chest.y + 0.35 };
+  const lShoulder = frontFacing
+    ? { x: chest.x - 2.85 * wS, y: chest.y + 0.2 }
+    : { x: chest.x - pose.shoulderYaw * 2.2 * wS, y: chest.y - 0.35 };
 
   // Foot targets (clamped strictly at -ANKLE_H when grounded so boots NEVER sink below the floor!)
   let lFootTarget = { x: pose.lFootX * wS, y: pose.lFootY * hS };
@@ -2639,15 +3000,48 @@ export function drawCharacter(ctx, ent, time) {
     if (rFootTarget.y > -ANKLE_H) rFootTarget.y = -ANKLE_H;
   }
 
-  // Two-Bone IK for both legs (bendDir = -1 guarantees knees ALWAYS bend forward, NEVER backwards!)
-  const lLegIK = solveTwoBoneIK(lHip, lFootTarget, L_THIGH, L_SHIN, -1);
-  const rLegIK = solveTwoBoneIK(rHip, rFootTarget, L_THIGH, L_SHIN, -1);
+  // Two-Bone IK for both legs:
+  //   - Facing right (fYaw >= 0.35): bendDir = -1 (knees bend forward +x)
+  //   - Facing left (fYaw < -0.35, e.g. turn frame 1): bendDir = +1 (knees bend forward -x, NEVER broken backwards!)
+  //   - Facing camera (frontFacing, turn frame 2): clean athletic pivot knees (not bow-legged!)
+  let lLegIK, rLegIK;
+  if (frontFacing) {
+    lLegIK = {
+      mid: { x: lerp(lHip.x, lFootTarget.x, 0.5) - 0.55 * wS, y: lerp(lHip.y, lFootTarget.y, 0.5) + 0.15 * hS },
+      end: lFootTarget,
+    };
+    rLegIK = {
+      mid: { x: lerp(rHip.x, rFootTarget.x, 0.5) + 0.55 * wS, y: lerp(rHip.y, rFootTarget.y, 0.5) + 0.15 * hS },
+      end: rFootTarget,
+    };
+  } else {
+    const kneeBend = fYaw < -0.35 ? 1 : -1;
+    lLegIK = solveTwoBoneIK(lHip, lFootTarget, L_THIGH, L_SHIN, kneeBend);
+    rLegIK = solveTwoBoneIK(rHip, rFootTarget, L_THIGH, L_SHIN, kneeBend);
+  }
 
-  // Two-Bone IK for both arms
+  // Arms: direct FK during locomotion (when pose.fkArms is set) so elbow angles & back-swing never clamp or flip;
+  // asymmetrical bent pivot arms during front-facing turn (left lower-bent at waist, right higher swinging across);
+  // 2-bone IK for fencing/ledge-grabbing!
   const lHandTarget = { x: pose.lHandX * wS, y: pose.lHandY * hS };
   const rHandTarget = { x: pose.rHandX * wS, y: pose.rHandY * hS };
-  const lArmIK = solveTwoBoneIK(lShoulder, lHandTarget, L_UPPER, L_FORE, pose.lElbowBend);
-  const rArmIK = solveTwoBoneIK(rShoulder, rHandTarget, L_UPPER, L_FORE, pose.rElbowBend);
+  let lArmIK, rArmIK;
+  if (frontFacing) {
+    lArmIK = {
+      mid: { x: lShoulder.x - 1.45 * wS, y: lShoulder.y + 4.3 * hS },
+      end: { x: lShoulder.x - 0.65 * wS, y: lShoulder.y + 6.9 * hS },
+    };
+    rArmIK = {
+      mid: { x: rShoulder.x + 1.65 * wS, y: rShoulder.y + 3.6 * hS },
+      end: { x: rShoulder.x + 0.55 * wS, y: rShoulder.y + 5.7 * hS },
+    };
+  } else if (pose.fkArms) {
+    lArmIK = fkArmJoints(lShoulder.x, lShoulder.y, pose.fkArms.lUpper, pose.fkArms.lElbow, L_UPPER, L_FORE);
+    rArmIK = fkArmJoints(rShoulder.x, rShoulder.y, pose.fkArms.rUpper, pose.fkArms.rElbow, L_UPPER, L_FORE);
+  } else {
+    lArmIK = solveTwoBoneIK(lShoulder, lHandTarget, L_UPPER, L_FORE, pose.lElbowBend);
+    rArmIK = solveTwoBoneIK(rShoulder, rHandTarget, L_UPPER, L_FORE, pose.rElbowBend);
+  }
 
   // -------------------------------------------------------------------------
   // Render Character
@@ -2655,22 +3049,24 @@ export function drawCharacter(ctx, ent, time) {
   ctx.save();
   ctx.translate(ent.x, ent.y);
 
-  // 1. World-space Oblique Contact Shadow (tracks exact foot stance width!)
+  // 1. World-space Oblique Contact Shadow (tracks exact foot stance width & softens cleanly in flight!)
   if (ent.grounded) {
     ctx.save();
     const fMin = Math.min(lLegIK.end.x, rLegIK.end.x) * ent.facing;
     const fMax = Math.max(lLegIK.end.x, rLegIK.end.x) * ent.facing;
     const sCenter = (fMin + fMax) * 0.5;
-    const sHalfW = ent.alive ? clamp((fMax - fMin) * 0.5 + 4.8, 7.5, 16.5) : 13.5;
+    const lowestFootY = Math.max(lLegIK.end.y, rLegIK.end.y);
+    const flightLift = ent.alive ? clamp((-ANKLE_H - lowestFootY) / 3.0, 0, 1) : 0;
+    const sHalfW = ent.alive ? clamp((fMax - fMin) * 0.5 + 4.4, 7.2, 16.0) * (1 - flightLift * 0.22) : 13.5;
 
     ctx.transform(1, 0, ISO_DX / ISO_DY, 1, sCenter + 1.2, -0.6);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.fillStyle = `rgba(0, 0, 0, ${(0.18 * (1 - flightLift * 0.45)).toFixed(3)})`;
     ctx.beginPath();
-    ctx.ellipse(0, 0, sHalfW + 1.8, 2.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, sHalfW + 1.6, 2.3 * (1 - flightLift * 0.2), 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    ctx.fillStyle = `rgba(0, 0, 0, ${(0.34 * (1 - flightLift * 0.50)).toFixed(3)})`;
     ctx.beginPath();
-    ctx.ellipse(0, 0, sHalfW * 0.78, 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, sHalfW * 0.76, 1.4 * (1 - flightLift * 0.2), 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -2697,53 +3093,139 @@ export function drawCharacter(ctx, ent, time) {
   const skinShade = flashing ? '#ffdddd' : pal.skinShade;
   const outline = 'rgba(6, 9, 14, 0.62)';
 
-  // 2. Back Arm (lArm)
-  const backForeCol = pal.shortSleeves ? skinShade : jacketDark;
-  drawLimbTaper(ctx, lShoulder.x, lShoulder.y, lArmIK.mid.x, lArmIK.mid.y, 1.45 * wS, 1.15 * wS, jacketDark, null, outline);
-  drawLimbTaper(ctx, lArmIK.mid.x, lArmIK.mid.y, lArmIK.end.x, lArmIK.end.y, 1.1 * wS, 0.85 * wS, backForeCol, null, outline);
+  // 2. Back Arm (lArm) — clearly darker burgundy shade behind torso (zero bright highlight) so near vs far arm separation is instant!
+  const backArmCol = flashing ? '#ffcccc' : (pal.coatStyle === 'courier' ? '#5e0f13' : jacketDark);
+  const backForeCol = pal.shortSleeves ? skinShade : backArmCol;
+  drawLimbTaper(ctx, lShoulder.x, lShoulder.y, lArmIK.mid.x, lArmIK.mid.y, 1.50 * wS, 1.18 * wS, backArmCol, null, outline);
+  drawLimbTaper(ctx, lArmIK.mid.x, lArmIK.mid.y, lArmIK.end.x, lArmIK.end.y, 1.14 * wS, 0.90 * wS, backForeCol, null, outline);
   drawHand(ctx, lArmIK.end, lArmIK.mid, skinShade, skinShade, outline);
 
-  // 3. Back Leg (lLeg) + Boot
-  drawLimbTaper(ctx, lHip.x, lHip.y, lLegIK.mid.x, lLegIK.mid.y, 1.8 * wS, 1.35 * wS, pantsDark, null, outline);
-  drawLimbTaper(ctx, lLegIK.mid.x, lLegIK.mid.y, lLegIK.end.x, lLegIK.end.y, 1.3 * wS, 0.95 * wS, pantsDark, null, outline);
-  drawBoot(ctx, lLegIK.end, pose.lFootAngle, pose.lFootTurnOut, pal, false, outline, hS);
+  // 3. Back Leg (lLeg) + Boot (tighter hip cap so leg joins cleanly inside pelvis silhouette)
+  const bootFlip = fYaw < -0.35;
+  drawLimbTaper(ctx, lHip.x, lHip.y, lLegIK.mid.x, lLegIK.mid.y, 1.65 * wS, 1.30 * wS, pantsDark, null, outline);
+  drawLimbTaper(ctx, lLegIK.mid.x, lLegIK.mid.y, lLegIK.end.x, lLegIK.end.y, 1.28 * wS, 0.94 * wS, pantsDark, null, outline);
+  drawBoot(ctx, lLegIK.end, pose.lFootAngle, pose.lFootTurnOut, pal, frontFacing, outline, hS, bootFlip);
 
-  // 4. Sheathed Scabbard at hip (sleekly tucked behind rear hip)
+  // 4. Sheathed Scabbard at hip — consistent diagonal angle with subtle 1-frame lagging bounce follow-through!
   const showDrawnSword = pose.swordVisibleOverride !== null ? pose.swordVisibleOverride : !!ent.swordDrawn;
   if (ent.hasSword && pal.sword && ent.alive) {
+    const sYaw = clamp(fYaw, -1, 1);
+    const runBounceLag = clip === 'run' ? Math.sin(((ent.animT || 0) - 0.08) * Math.PI * 4) * 0.55 : 0;
+    const scabLag = clamp(vis.hemAng * 0.03 + runBounceLag, -0.65, 0.65);
+    const sx0 = frontFacing ? pelvis.x - 1.9 : pelvis.x - 0.8 * sYaw;
+    const sy0 = pelvis.y + 0.55;
+    const tipDx = frontFacing ? -1.4 : -6.2 * sYaw;
+    const tipDy = frontFacing ? 5.8 : 4.5 + scabLag;
     ctx.strokeStyle = '#1b1916';
     ctx.lineWidth = showDrawnSword ? 0.95 : 1.25;
     ctx.beginPath();
-    ctx.moveTo(lHip.x - 0.5, lHip.y + 0.5);
-    ctx.lineTo(lHip.x - 8.2, lHip.y + 4.4);
+    ctx.moveTo(sx0, sy0);
+    ctx.lineTo(sx0 + tipDx, sy0 + tipDy);
     ctx.stroke();
-    ctx.strokeStyle = pal.hilt;
-    ctx.lineWidth = 0.65;
-    ctx.beginPath();
-    ctx.moveTo(lHip.x - 0.5, lHip.y + 0.5);
-    ctx.lineTo(lHip.x - 2.0, lHip.y + 1.3);
-    ctx.stroke();
-    if (!showDrawnSword) {
+    if (!frontFacing) {
       ctx.strokeStyle = pal.hilt;
-      ctx.lineWidth = 1.05;
+      ctx.lineWidth = 0.65;
       ctx.beginPath();
-      ctx.moveTo(lHip.x - 0.5, lHip.y + 0.5);
-      ctx.lineTo(lHip.x + 1.4, lHip.y - 0.6);
+      ctx.moveTo(sx0, sy0);
+      ctx.lineTo(sx0 + tipDx * 0.20, sy0 + tipDy * 0.20);
       ctx.stroke();
+      if (!showDrawnSword) {
+        ctx.strokeStyle = pal.hilt;
+        ctx.lineWidth = 1.05;
+        ctx.beginPath();
+        ctx.moveTo(sx0, sy0);
+        ctx.lineTo(sx0 - tipDx * 0.22, sy0 - tipDy * 0.22);
+        ctx.stroke();
+      }
     }
   }
 
-  // 5. Tailored Torso, Costume, Belt & Secondary-Motion Scarf/Coat-Tail
-  drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulder, pal, flashing, outline, vis.hemAng, wS, hS);
+  // 5. Tailored Torso, Costume, Belt & Secondary-Motion Coat-Tail
+  const torsoBounds = drawTorsoAndCostume(ctx, pelvis, chest, lHip, rHip, lShoulder, rShoulder, pal, flashing, outline, vis.hemAng, wS, hS, fYaw, pose.shoulderYaw);
 
-  // 6. Neck, Head, Face Direction & Archetype Headwear
+  // Record exact rendered joints when requested (used by ?bones=1 overlay & arm-check reports!)
+  if (debugOut) {
+    const angFromDown = (a, b) => (Math.atan2(b.x - a.x, b.y - a.y) * 180) / Math.PI;
+    const wrapDiff = (d) => ((d + 540) % 360) - 180;
+    const rUpperDeg = angFromDown(rShoulder, rArmIK.mid);
+    const lUpperDeg = angFromDown(lShoulder, lArmIK.mid);
+    const rForeDeg = angFromDown(rArmIK.mid, rArmIK.end);
+    const lForeDeg = angFromDown(lArmIK.mid, lArmIK.end);
+    const rThighDeg = angFromDown(rHip, rLegIK.mid);
+    const lThighDeg = angFromDown(lHip, lLegIK.mid);
+    const rShinDeg = angFromDown(rLegIK.mid, rLegIK.end);
+    const lShinDeg = angFromDown(lLegIK.mid, lLegIK.end);
+    // Compute exact rendered toe-tip points (matching drawBoot local toe (3.55, 1.35)) & shin-to-foot interior angles!
+    const computeToe = (ankle, footAngleDeg, turnOut, flipX) => {
+      if (turnOut > 0.55) {
+        return { x: ankle.x + 0.4, y: ankle.y + 1.5 * hS };
+      }
+      const rad = degRad(footAngleDeg);
+      const c = Math.cos(rad);
+      const s = Math.sin(rad);
+      const lx = 3.55;
+      const ly = 1.35 * hS;
+      if (flipX) {
+        return { x: ankle.x - (lx * c + ly * s), y: ankle.y + (-lx * s + ly * c) };
+      }
+      return { x: ankle.x + (lx * c - ly * s), y: ankle.y + (lx * s + ly * c) };
+    };
+    const rToe = computeToe(rLegIK.end, pose.rFootAngle, pose.rFootTurnOut, bootFlip);
+    const lToe = computeToe(lLegIK.end, pose.lFootAngle, pose.lFootTurnOut, bootFlip);
+    // Anatomical shin-to-foot interior angle: 90° = perpendicular, 115-130° = relaxed plantar-flexed
+    const norm360 = (a) => ((a % 360) + 360) % 360;
+    const rAnkleIntDeg = norm360(pose.rFootAngle + 90 + rShinDeg);
+    const lAnkleIntDeg = norm360(pose.lFootAngle + 90 + lShinDeg);
+    Object.assign(debugOut, {
+      upperArmLen: L_UPPER,
+      foreArmLen: L_FORE,
+      pelvis: { ...pelvis },
+      chest: { ...chest },
+      rShoulder: { ...rShoulder },
+      rElbow: { ...rArmIK.mid },
+      rHand: { ...rArmIK.end },
+      lShoulder: { ...lShoulder },
+      lElbow: { ...lArmIK.mid },
+      lHand: { ...lArmIK.end },
+      rHip: { ...rHip },
+      rKnee: { ...rLegIK.mid },
+      rAnkle: { ...rLegIK.end },
+      rToe,
+      lHip: { ...lHip },
+      lKnee: { ...lLegIK.mid },
+      lAnkle: { ...lLegIK.end },
+      lToe,
+      torsoBackX: torsoBounds.torsoBackX,
+      torsoFrontX: torsoBounds.torsoFrontX,
+      chestBackX: torsoBounds.chestBackX,
+      chestFrontX: torsoBounds.chestFrontX,
+      hipBackX: torsoBounds.hipBackX,
+      hipFrontX: torsoBounds.hipFrontX,
+      rUpperDeg,
+      lUpperDeg,
+      rElbowFlex: wrapDiff(rForeDeg - rUpperDeg),
+      lElbowFlex: wrapDiff(lForeDeg - lUpperDeg),
+      rThighDeg,
+      lThighDeg,
+      rKneeFlex: wrapDiff(rThighDeg - rShinDeg),
+      lKneeFlex: wrapDiff(lThighDeg - lShinDeg),
+      rAnkleIntDeg,
+      lAnkleIntDeg,
+      rFootLowestY: rLegIK.end.y + bootLowestOffsetY(pose.rFootAngle, hS),
+      lFootLowestY: lLegIK.end.y + bootLowestOffsetY(pose.lFootAngle, hS),
+      torsoLean: pose.torsoLean,
+    });
+  }
+
+  // 6. Neck, Head, Face Direction (with 3/4 & front-facing turn yaw) & Archetype Headwear
   const headDeg = pose.torsoLean * 0.3 + pose.headTilt;
-  drawHeadAndHair(ctx, neck, head, headDeg, pal, flashing, outline, vis.hairAng, wS, hS);
+  drawHeadAndHair(ctx, neck, head, headDeg, pal, flashing, outline, vis.hairAng, wS, hS, fYaw);
 
-  // 7. Front Leg (rLeg) + Boot
-  drawLimbTaper(ctx, rHip.x, rHip.y, rLegIK.mid.x, rLegIK.mid.y, 1.95 * wS, 1.42 * wS, pants, pantsHi, outline);
-  drawLimbTaper(ctx, rLegIK.mid.x, rLegIK.mid.y, rLegIK.end.x, rLegIK.end.y, 1.38 * wS, 1.0 * wS, pants, pantsHi, outline);
-  drawBoot(ctx, rLegIK.end, pose.rFootAngle, pose.rFootTurnOut, pal, true, outline, hS);
+  // 7. Front Leg (rLeg) + Boot (tighter hip cap on front-facing turn so near hip never pops as a disc!)
+  const nearHipR = (frontFacing ? 1.48 : 1.68) * wS;
+  drawLimbTaper(ctx, rHip.x, rHip.y, rLegIK.mid.x, rLegIK.mid.y, nearHipR, 1.34 * wS, pants, pantsHi, outline);
+  drawLimbTaper(ctx, rLegIK.mid.x, rLegIK.mid.y, rLegIK.end.x, rLegIK.end.y, 1.32 * wS, 0.98 * wS, pants, pantsHi, outline);
+  drawBoot(ctx, rLegIK.end, pose.rFootAngle, pose.rFootTurnOut, pal, true, outline, hS, bootFlip);
 
   // 8. Drawn Sword (anchored strictly inside rArmIK.end — never detached from hand!)
   if (showDrawnSword && pal.sword) {
@@ -2766,11 +3248,12 @@ export function drawCharacter(ctx, ent, time) {
     ctx.restore();
   }
 
-  // 10. Front Arm (rArm) + Hand drawn cleanly OVER sword grip!
+  // 10. Front Arm (rArm) + Hand drawn cleanly OVER sword grip & torso with crisp outline contrast!
   const frontForeCol = pal.shortSleeves ? skin : jacket;
   const frontForeHi = pal.shortSleeves ? null : jacketHi;
-  drawLimbTaper(ctx, rShoulder.x, rShoulder.y, rArmIK.mid.x, rArmIK.mid.y, 1.55 * wS, 1.2 * wS, jacket, jacketHi, outline);
-  drawLimbTaper(ctx, rArmIK.mid.x, rArmIK.mid.y, rArmIK.end.x, rArmIK.end.y, 1.15 * wS, 0.9 * wS, frontForeCol, frontForeHi, outline);
+  const nearArmOutline = 'rgba(8, 6, 10, 0.84)';
+  drawLimbTaper(ctx, rShoulder.x, rShoulder.y, rArmIK.mid.x, rArmIK.mid.y, 1.55 * wS, 1.2 * wS, jacket, jacketHi, nearArmOutline);
+  drawLimbTaper(ctx, rArmIK.mid.x, rArmIK.mid.y, rArmIK.end.x, rArmIK.end.y, 1.15 * wS, 0.9 * wS, frontForeCol, frontForeHi, nearArmOutline);
   // Crisp shirt cuff at wrist (for long-sleeved characters)
   if (!flashing && !pal.shortSleeves) {
     const cuAng = Math.atan2(rArmIK.end.y - rArmIK.mid.y, rArmIK.end.x - rArmIK.mid.x);
@@ -2807,4 +3290,24 @@ export function drawCharacter(ctx, ent, time) {
   }
 
   ctx.restore();
+}
+
+
+// Read-only kinematics sampler backed by the EXACT drawCharacter rendering path (no-op canvas ctx)
+const NOOP_CTX = {
+  save() {}, restore() {}, translate() {}, scale() {}, rotate() {}, transform() {},
+  beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {}, ellipse() {},
+  quadraticCurveTo() {}, fill() {}, stroke() {}, fillRect() {},
+  createLinearGradient() { return { addColorStop() {} }; },
+};
+
+export function sampleRunKinematics(u) {
+  const ent = {
+    x: 0, y: 0, vx: 104, vy: 0, facing: 1, palette: 'hero',
+    grounded: true, alive: true, hasSword: true, swordDrawn: false,
+    hurtFlash: 0, anim: 'run', animT: u, state: 'run',
+  };
+  const debug = {};
+  drawCharacter(NOOP_CTX, ent, 2.0 + u * 0.42, debug);
+  return { u, ...debug };
 }
